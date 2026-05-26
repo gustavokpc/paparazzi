@@ -135,7 +135,7 @@ endif
 
 plotprofile: plotprofile.c
 	@echo CC $@
-	$(Q)$(CC) $(CFLAGS) $(GLIBIVY_CFLAGS) -o $@ $^ $(IVY_C_LIBS)
+	$(Q)$(CC) $(CFLAGS) $(GLIBIVY_CFLAGS) -o $@ $^ $(IVY_C_LIBS) -lpcre2-8
 
 ahrs2fg: ahrs2fg.c network.c flight_gear.c utils.c
 	$(CC) $(CFLAGS) $(GLIBIVY_CFLAGS) -o $@ $^ $(IVY_C_LIBS) -lm

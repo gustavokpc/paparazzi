@@ -60,7 +60,7 @@ if [ "$GPU_TYPE" = "nvidia" ]; then
     GPU_OPTS+=(--gpus all --env NVIDIA_DRIVER_CAPABILITIES=all)
 elif [ -d /dev/dri ]; then
     echo "[GPU] Using Mesa/Intel/AMD (DRI)"
-    GPU_OPTS+=(--device=/dev/dri/card0 --device=/dev/dri/renderD128)
+    GPU_OPTS+=(--device=/dev/dri/card1 --device=/dev/dri/card2 --device=/dev/dri/renderD128 --device=/dev/dri/renderD129)
     RENDER_GID=$(getent group render 2>/dev/null | cut -d: -f3)
     VIDEO_GID=$(getent group video  2>/dev/null | cut -d: -f3)
     [ -n "$RENDER_GID" ] && GPU_OPTS+=(--group-add="$RENDER_GID") && echo "[GPU] Added render group (GID $RENDER_GID)"
@@ -128,6 +128,8 @@ docker run \
     --rm -it \
     --cap-add=SYS_NICE \
     --ulimit rtprio=99 \
+    --group-add=44 \
+    --group-add=992 \
     --env="NO_AT_BRIDGE=1" \
     "${X_OPTS[@]}" \
     "${GPU_OPTS[@]}" \
@@ -137,7 +139,7 @@ docker run \
     "${USB_OPTS[@]}" \
     "${VOL_OPTS[@]}" \
     -e LOCAL_USER_ID="$(id -u)" \
-    -e LOCAL_GROUP_ID="$(id -g)" \
+    -e LOCAL_GROUP_ID="44" \
     "$IMAGE_NAME" \
     $CMD
 

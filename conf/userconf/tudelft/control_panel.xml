@@ -4,6 +4,9 @@
     <program name="GCS" command="sw/ground_segment/cockpit/gcs">
       <arg flag="-layout" constant="bottom_settings.xml"/>
     </program>
+
+    <program name="PprzGCS" command="/usr/bin/pprzgcs" icon="gcs.svg" favorite="True"/>
+
     <program name="Plot Meteo Profile" command="sw/logalizer/plotprofile"/>
   </section>
 
@@ -413,15 +416,7 @@
       <program name="Server">
         <arg flag="-n"/>
       </program>
-      <program name="GCS">
-        <arg flag="-speech"/>
-        <arg flag="-maximize"/>
-        <arg flag="-center_ac"/>
-        <arg flag="-mercator"/>
-        <arg flag="-maps_no_http"/>
-        <arg flag="-track_size" constant="200"/>
-        <arg flag="-zoom" constant="40."/>
-      </program>
+      <program name="PprzGCS"/>
       <program name="Gazebo"/>
     </session>
 
@@ -436,15 +431,7 @@
       <program name="Server">
         <arg flag="-n"/>
       </program>
-      <program name="GCS">
-        <arg flag="-speech"/>
-        <arg flag="-maximize"/>
-        <arg flag="-center_ac"/>
-        <arg flag="-mercator"/>
-        <arg flag="-maps_no_http"/>
-        <arg flag="-track_size" constant="200"/>
-        <arg flag="-zoom" constant="40."/>
-      </program>
+      <program name="PprzGCS"/>
 
       <program name="Joystick">
         <arg flag="-ac" constant="@AIRCRAFT"/>

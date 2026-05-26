@@ -36,6 +36,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     # Paparazzi build & GCS
     paparazzi-dev \
     pprzgcs \
+    libpcre2-dev \
     # Build tools (simulation only — ARM cross-compiler not needed)
     build-essential \
     cmake \
@@ -58,6 +59,21 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     x11-apps \
     dbus-x11 \
     libcanberra-gtk3-module \
+    qt6-qpa-plugins \
+    libqt6gui6 \
+    libqt6widgets6 \
+    libqt6core6 \
+    libqt6dbus6 \
+    libxcb-cursor0 \
+    libxcb-xinerama0 \
+    libxkbcommon-x11-0 \
+    libxcb-xinput0 \
+    libxcb-keysyms1 \
+    libxcb-image0 \
+    libxcb-shm0 \
+    libxcb-icccm4 \
+    libxcb-render-util0 \
+    libxcb-randr0 \
     # Joystick
     joystick \
     libsdl2-dev \
@@ -95,3 +111,7 @@ RUN chmod +x /usr/local/bin/entrypoint.sh
 
 ENTRYPOINT ["/tini", "--", "/usr/local/bin/entrypoint.sh"]
 CMD ["bash"]
+
+# Qt6 plugin path for PprzGCS
+ENV QT_PLUGIN_PATH=/usr/lib/x86_64-linux-gnu/qt6/plugins
+ENV QT_QPA_PLATFORM_PLUGIN_PATH=/usr/lib/x86_64-linux-gnu/qt6/plugins/platforms

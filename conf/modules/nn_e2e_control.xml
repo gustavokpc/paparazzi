@@ -1,0 +1,91 @@
+<!DOCTYPE module SYSTEM "module.dtd">
+<module name="nn_e2e_control" dir="nn_e2e_control" task="control">
+  <doc>
+    <description>
+      End-to-end neural controller wrapper for the TU Delft Cyberzoo square waypoint test.
+      The network input order is defined in nn_parameters.h. The network output is interpreted
+      as normalized motor commands in [0,1] and exported as nn_e2e_control_motor_pprz[] and
+      nn_e2e_control_last_rpm[]. Keep the periodic task running and gate motor output with
+      nn_e2e_control_start()/nn_e2e_control_stop().
+    </description>
+    <define name="NN_E2E_REACHED_RADIUS_M" value="0.6f" unit="m" description="Distance at which the module advances to the next internal square waypoint"/>
+    <define name="NN_E2E_TARGET_ALT_M" value="1.0f" unit="m" description="Altitude of the internal square waypoints"/>
+    <define name="NN_E2E_START_WAYPOINT_INDEX" value="1" description="Initial square waypoint index; 1 starts at NN_SQ_2"/>
+    <define name="NN_E2E_MIN_RPM" value="5000.0f" unit="rpm" description="RPM value corresponding to NN output 0"/>
+    <define name="NN_E2E_MAX_RPM" value="10000.0f" unit="rpm" description="RPM value corresponding to NN output 1"/>
+    <define name="NN_E2E_MIN_PPRZ" value="5000" description="Motor command corresponding to NN output 0"/>
+    <define name="NN_E2E_MAX_PPRZ" value="10000" description="Motor command corresponding to NN output 1"/>
+    <define name="NN_E2E_MOTOR_0_SRC" value="0" description="NN output index used by servo 0"/>
+    <define name="NN_E2E_MOTOR_1_SRC" value="1" description="NN output index used by servo 1"/>
+    <define name="NN_E2E_MOTOR_2_SRC" value="2" description="NN output index used by servo 2"/>
+    <define name="NN_E2E_MOTOR_3_SRC" value="3" description="NN output index used by servo 3"/>
+    <define name="NN_E2E_MOTOR_0_INVERT" value="0|1" description="Invert normalized PPRZ command used by servo 0"/>
+    <define name="NN_E2E_MOTOR_1_INVERT" value="0|1" description="Invert normalized PPRZ command used by servo 1"/>
+    <define name="NN_E2E_MOTOR_2_INVERT" value="0|1" description="Invert normalized PPRZ command used by servo 2"/>
+    <define name="NN_E2E_MOTOR_3_INVERT" value="0|1" description="Invert normalized PPRZ command used by servo 3"/>
+    <define name="NN_E2E_USE_NED_INPUT" value="0|1" description="Convert ENU position error and velocity to NED before feeding the neural network"/>
+  </doc>
+
+  <settings>
+    <dl_settings>
+      <dl_settings name="NN E2E">
+        <dl_setting var="nn_e2e_control_enabled" min="0" step="1" max="1" shortname="enabled" values="FALSE|TRUE" type="bool" module="modules/nn_e2e_control/nn_e2e_control"/>
+        <dl_setting var="nn_e2e_control_periodic_count" min="0" step="1" max="1000000" shortname="periodic" type="uint32"/>
+        <dl_setting var="nn_e2e_control_waypoint_index" min="0" step="1" max="3" shortname="wp_idx" type="uint32"/>
+        <dl_setting var="nn_e2e_control_reached_radius_m" min="0.05" step="0.05" max="2" shortname="reached" type="float"/>
+        <dl_setting var="nn_e2e_control_output_min_pprz" min="0" step="100" max="12000" shortname="out_min" type="int32"/>
+        <dl_setting var="nn_e2e_control_output_max_pprz" min="0" step="100" max="14000" shortname="out_max" type="int32"/>
+        <dl_setting var="nn_e2e_control_use_ned_input" min="0" step="1" max="1" shortname="use_ned" values="FALSE|TRUE" type="bool" module="modules/nn_e2e_control/nn_e2e_control"/>
+        <dl_setting var="nn_e2e_control_motor_src[0]" min="0" step="1" max="3" shortname="src0" type="uint8"/>
+        <dl_setting var="nn_e2e_control_motor_src[1]" min="0" step="1" max="3" shortname="src1" type="uint8"/>
+        <dl_setting var="nn_e2e_control_motor_src[2]" min="0" step="1" max="3" shortname="src2" type="uint8"/>
+        <dl_setting var="nn_e2e_control_motor_src[3]" min="0" step="1" max="3" shortname="src3" type="uint8"/>
+        <dl_setting var="nn_e2e_control_motor_invert[0]" min="0" step="1" max="1" shortname="inv0" values="FALSE|TRUE" type="bool" module="modules/nn_e2e_control/nn_e2e_control"/>
+        <dl_setting var="nn_e2e_control_motor_invert[1]" min="0" step="1" max="1" shortname="inv1" values="FALSE|TRUE" type="bool" module="modules/nn_e2e_control/nn_e2e_control"/>
+        <dl_setting var="nn_e2e_control_motor_invert[2]" min="0" step="1" max="1" shortname="inv2" values="FALSE|TRUE" type="bool" module="modules/nn_e2e_control/nn_e2e_control"/>
+        <dl_setting var="nn_e2e_control_motor_invert[3]" min="0" step="1" max="1" shortname="inv3" values="FALSE|TRUE" type="bool" module="modules/nn_e2e_control/nn_e2e_control"/>
+        <dl_setting var="nn_e2e_control_target[0]" min="-20" step="0.01" max="20" shortname="target_x" type="float"/>
+        <dl_setting var="nn_e2e_control_target[1]" min="-20" step="0.01" max="20" shortname="target_y" type="float"/>
+        <dl_setting var="nn_e2e_control_target[2]" min="-5" step="0.01" max="10" shortname="target_z" type="float"/>
+        <dl_setting var="nn_e2e_control_error[0]" min="-20" step="0.01" max="20" shortname="err_x" type="float"/>
+        <dl_setting var="nn_e2e_control_error[1]" min="-20" step="0.01" max="20" shortname="err_y" type="float"/>
+        <dl_setting var="nn_e2e_control_error[2]" min="-10" step="0.01" max="10" shortname="err_z" type="float"/>
+        <dl_setting var="nn_e2e_control_input_error[0]" min="-20" step="0.01" max="20" shortname="in_dx" type="float"/>
+        <dl_setting var="nn_e2e_control_input_error[1]" min="-20" step="0.01" max="20" shortname="in_dy" type="float"/>
+        <dl_setting var="nn_e2e_control_input_error[2]" min="-10" step="0.01" max="10" shortname="in_dz" type="float"/>
+        <dl_setting var="nn_e2e_control_input_velocity[0]" min="-10" step="0.01" max="10" shortname="in_vx" type="float"/>
+        <dl_setting var="nn_e2e_control_input_velocity[1]" min="-10" step="0.01" max="10" shortname="in_vy" type="float"/>
+        <dl_setting var="nn_e2e_control_input_velocity[2]" min="-10" step="0.01" max="10" shortname="in_vz" type="float"/>
+        <dl_setting var="nn_e2e_control_dist_to_target" min="0" step="0.01" max="50" shortname="dist" type="float"/>
+        <dl_setting var="nn_e2e_control_motor_pprz[0]" min="0" step="1" max="12000" shortname="m0_pprz" type="int32"/>
+        <dl_setting var="nn_e2e_control_motor_pprz[1]" min="0" step="1" max="12000" shortname="m1_pprz" type="int32"/>
+        <dl_setting var="nn_e2e_control_motor_pprz[2]" min="0" step="1" max="12000" shortname="m2_pprz" type="int32"/>
+        <dl_setting var="nn_e2e_control_motor_pprz[3]" min="0" step="1" max="12000" shortname="m3_pprz" type="int32"/>
+        <dl_setting var="nn_e2e_control_raw_mean_pprz" min="0" step="1" max="12000" shortname="raw_mean" type="int32"/>
+        <dl_setting var="nn_e2e_control_applied_pprz[0]" min="0" step="1" max="12000" shortname="a0_pprz" type="int32"/>
+        <dl_setting var="nn_e2e_control_applied_pprz[1]" min="0" step="1" max="12000" shortname="a1_pprz" type="int32"/>
+        <dl_setting var="nn_e2e_control_applied_pprz[2]" min="0" step="1" max="12000" shortname="a2_pprz" type="int32"/>
+        <dl_setting var="nn_e2e_control_applied_pprz[3]" min="0" step="1" max="12000" shortname="a3_pprz" type="int32"/>
+        <dl_setting var="nn_e2e_control_last_norm[0]" min="0" step="0.001" max="1" shortname="m0_norm" type="float"/>
+        <dl_setting var="nn_e2e_control_last_norm[1]" min="0" step="0.001" max="1" shortname="m1_norm" type="float"/>
+        <dl_setting var="nn_e2e_control_last_norm[2]" min="0" step="0.001" max="1" shortname="m2_norm" type="float"/>
+        <dl_setting var="nn_e2e_control_last_norm[3]" min="0" step="0.001" max="1" shortname="m3_norm" type="float"/>
+      </dl_settings>
+    </dl_settings>
+  </settings>
+
+  <dep>
+    <depends>@state,@navigation,@mixing</depends>
+  </dep>
+  <header>
+    <file name="nn_e2e_control.h"/>
+  </header>
+  <init fun="nn_e2e_control_init()"/>
+  <periodic fun="nn_e2e_control_periodic()" freq="50." autorun="TRUE"/>
+
+  <makefile target="ap|nps">
+    <file name="nn_e2e_control.c"/>
+    <file name="nn_operations.c"/>
+    <file name="nn_parameters.c"/>
+  </makefile>
+</module>

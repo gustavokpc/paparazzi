@@ -41,11 +41,6 @@
         <dl_setting var="nn_cfc_control_motor_pprz[1]" min="0" step="1" max="12000" shortname="m1_pprz" type="int32"/>
         <dl_setting var="nn_cfc_control_motor_pprz[2]" min="0" step="1" max="12000" shortname="m2_pprz" type="int32"/>
         <dl_setting var="nn_cfc_control_motor_pprz[3]" min="0" step="1" max="12000" shortname="m3_pprz" type="int32"/>
-        <dl_setting var="nn_cfc_control_raw_mean_pprz" min="0" step="1" max="12000" shortname="raw_mean" type="int32"/>
-        <dl_setting var="nn_cfc_control_applied_pprz[0]" min="0" step="1" max="12000" shortname="a0_pprz" type="int32"/>
-        <dl_setting var="nn_cfc_control_applied_pprz[1]" min="0" step="1" max="12000" shortname="a1_pprz" type="int32"/>
-        <dl_setting var="nn_cfc_control_applied_pprz[2]" min="0" step="1" max="12000" shortname="a2_pprz" type="int32"/>
-        <dl_setting var="nn_cfc_control_applied_pprz[3]" min="0" step="1" max="12000" shortname="a3_pprz" type="int32"/>
         <dl_setting var="nn_cfc_control_last_norm[0]" min="0" step="0.001" max="1" shortname="m0_norm" type="float"/>
         <dl_setting var="nn_cfc_control_last_norm[1]" min="0" step="0.001" max="1" shortname="m1_norm" type="float"/>
         <dl_setting var="nn_cfc_control_last_norm[2]" min="0" step="0.001" max="1" shortname="m2_norm" type="float"/>

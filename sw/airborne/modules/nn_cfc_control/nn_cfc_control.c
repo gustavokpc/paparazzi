@@ -6,10 +6,11 @@
  * - This file builds the 19-element input expected by nn_cfc_parameters.h:
  *   dx, dy, dz, vx, vy, vz, phi, theta, psi, p, q, r,
  *   Mx_ext, My_ext, Mz_ext, omega1, omega2, omega3, omega4
- * - dx,dy,dz are the controller position errors, waypoint - current_position,
- *   converted to the training frame before being passed to the network.
- * - nn_cfc_control() returns normalized motor commands in [0,1]. This wrapper also
- *   exposes PPRZ and RPM-scaled copies for command laws and telemetry.
+ * - dx,dy,dz are the controller position errors, waypoint - current_position.
+ *   Paparazzi gives local position as ENU; this network is currently fed with
+ *   {Y, X, -Z}, which is the frame convention that made the controller fly.
+ * - nn_cfc_control() returns normalized motor commands in [0,1]. The wrapper
+ *   converts them to the Bebop servo command range before applying them.
  * - Motor commands are applied from the airframe command_laws through
  *   nn_cfc_control_get_motor_pprz(), so arming and motor order stay visible
  *   in the airframe file.
@@ -61,54 +62,6 @@ extern int16_t actuators_pprz[] __attribute__((weak));
 #define NN_CFC_MAX_RPM 10000.0f
 #endif
 
-#ifndef NN_CFC_MIN_PPRZ
-#define NN_CFC_MIN_PPRZ 0
-#endif
-
-#ifndef NN_CFC_MAX_PPRZ
-#define NN_CFC_MAX_PPRZ MAX_PPRZ
-#endif
-
-#ifndef NN_CFC_MOTOR_0_SRC
-#define NN_CFC_MOTOR_0_SRC 0
-#endif
-
-#ifndef NN_CFC_MOTOR_1_SRC
-#define NN_CFC_MOTOR_1_SRC 1
-#endif
-
-#ifndef NN_CFC_MOTOR_2_SRC
-#define NN_CFC_MOTOR_2_SRC 2
-#endif
-
-#ifndef NN_CFC_MOTOR_3_SRC
-#define NN_CFC_MOTOR_3_SRC 3
-#endif
-
-#ifndef NN_CFC_MOTOR_0_INVERT
-#define NN_CFC_MOTOR_0_INVERT 0
-#endif
-
-#ifndef NN_CFC_MOTOR_1_INVERT
-#define NN_CFC_MOTOR_1_INVERT 0
-#endif
-
-#ifndef NN_CFC_MOTOR_2_INVERT
-#define NN_CFC_MOTOR_2_INVERT 0
-#endif
-
-#ifndef NN_CFC_MOTOR_3_INVERT
-#define NN_CFC_MOTOR_3_INVERT 0
-#endif
-
-#ifndef NN_CFC_SWAP_XY_INPUT
-#define NN_CFC_SWAP_XY_INPUT 1
-#endif
-
-#ifndef NN_CFC_INVERT_Z_INPUT
-#define NN_CFC_INVERT_Z_INPUT 1
-#endif
-
 typedef struct {
   float x;
   float y;
@@ -130,22 +83,6 @@ int32_t nn_cfc_control_applied_pprz[4] = {0, 0, 0, 0};
 int32_t nn_cfc_control_raw_mean_pprz = 0;
 unsigned int nn_cfc_control_periodic_count = 0U;
 float nn_cfc_control_reached_radius_m = NN_CFC_REACHED_RADIUS_M;
-int32_t nn_cfc_control_output_min_pprz = NN_CFC_MIN_PPRZ;
-int32_t nn_cfc_control_output_max_pprz = NN_CFC_MAX_PPRZ;
-bool nn_cfc_control_swap_xy_input = NN_CFC_SWAP_XY_INPUT;
-bool nn_cfc_control_invert_z_input = NN_CFC_INVERT_Z_INPUT;
-uint8_t nn_cfc_control_motor_src[4] = {
-  NN_CFC_MOTOR_0_SRC,
-  NN_CFC_MOTOR_1_SRC,
-  NN_CFC_MOTOR_2_SRC,
-  NN_CFC_MOTOR_3_SRC
-};
-bool nn_cfc_control_motor_invert[4] = {
-  NN_CFC_MOTOR_0_INVERT,
-  NN_CFC_MOTOR_1_INVERT,
-  NN_CFC_MOTOR_2_INVERT,
-  NN_CFC_MOTOR_3_INVERT
-};
 float nn_cfc_control_target[3] = {0.f, 0.f, 0.f};
 float nn_cfc_control_position[3] = {0.f, 0.f, 0.f};
 float nn_cfc_control_error[3] = {0.f, 0.f, 0.f};
@@ -170,6 +107,11 @@ static const unsigned int nn_num_square_waypoints = sizeof(nn_square_waypoints) 
 
 static nn_vec3_t get_square_waypoint(unsigned int index)
 {
+  /*
+   * Prefer the flight-plan waypoints when they exist, so changes in the XML
+   * mission are reflected here. The static array above is only a fallback for
+   * builds/tests that do not define WP_NN_SQ_*.
+   */
 #if defined(WP_NN_SQ_1) && defined(WP_NN_SQ_2) && defined(WP_NN_SQ_3) && defined(WP_NN_SQ_4)
   static const uint8_t wp_ids[] = {WP_NN_SQ_1, WP_NN_SQ_2, WP_NN_SQ_3, WP_NN_SQ_4};
   const uint8_t wp_id = wp_ids[index % (sizeof(wp_ids) / sizeof(wp_ids[0]))];
@@ -181,6 +123,10 @@ static nn_vec3_t get_square_waypoint(unsigned int index)
 
 __attribute__((weak)) nn_vec3_t nn_cfc_get_position_m(void)
 {
+  /*
+   * Weak wrappers make the module testable: a unit test can override these
+   * functions without touching Paparazzi state internals.
+   */
   const struct EnuCoor_f *pos = stateGetPositionEnu_f();
   return (nn_vec3_t){pos->x, pos->y, pos->z};
 }
@@ -236,31 +182,23 @@ static float clampf(float x, float lo, float hi)
 
 static void clamp_state_to_training_range(float state[NUM_STATES])
 {
+  /*
+   * The exported network normalizes each input using input_norm_min/max. Clamp
+   * before inference so a sensor spike does not push the normalized value far
+   * outside the distribution used when exporting/training the model.
+   */
   for (unsigned int i = 0U; i < NUM_STATES; i++) {
     state[i] = clampf(state[i], input_norm_min[i], input_norm_max[i]);
   }
 }
 
-static int32_t clamp_motor_command(int32_t command)
-{
-  int32_t output_min = nn_cfc_control_output_min_pprz;
-  int32_t output_max = nn_cfc_control_output_max_pprz;
-  if (output_max < output_min) {
-    const int32_t tmp = output_min;
-    output_min = output_max;
-    output_max = tmp;
-  }
-  if (command < output_min) {
-    return output_min;
-  }
-  if (command > output_max) {
-    return output_max;
-  }
-  return command;
-}
-
 static void get_motor_driver_range(uint8_t motor_idx, int32_t *min, int32_t *neutral, int32_t *max)
 {
+  /*
+   * Servo min/neutral/max are generated from the airframe XML. For the Bebop
+   * airframe they are the real actuator command range, so this is the correct
+   * place to translate an RPM-like command into Paparazzi PPRZ.
+   */
   switch (motor_idx) {
 #ifdef SERVO_TOP_LEFT_IDX
     case SERVO_TOP_LEFT_IDX:
@@ -300,6 +238,10 @@ static void get_motor_driver_range(uint8_t motor_idx, int32_t *min, int32_t *neu
 
 static int32_t rpm_to_pprz_for_motor(uint8_t motor_idx, float rpm)
 {
+  /*
+   * Paparazzi servos are centered at "neutral". Here neutral is the motor idle
+   * command, so RPM above neutral maps into positive PPRZ up to MAX_PPRZ.
+   */
   int32_t min;
   int32_t neutral;
   int32_t max;
@@ -318,87 +260,36 @@ static int32_t rpm_to_pprz_for_motor(uint8_t motor_idx, float rpm)
   return TRIM_PPRZ((int32_t)(pprz >= 0.f ? pprz + 0.5f : pprz - 0.5f));
 }
 
-static int32_t normalized_to_pprz(float normalized_cmd)
+static nn_vec3_t to_network_frame_vec(const nn_vec3_t enu)
 {
-  int32_t output_min = nn_cfc_control_output_min_pprz;
-  int32_t output_max = nn_cfc_control_output_max_pprz;
-  if (output_max < output_min) {
-    const int32_t tmp = output_min;
-    output_min = output_max;
-    output_max = tmp;
-  }
-
-  const float u = clampf(normalized_cmd, 0.f, 1.f);
-  const float pprz = (float)output_min + u * (float)(output_max - output_min);
-  return TRIM_PPRZ((int32_t)(pprz + 0.5f));
+  /* Paparazzi ENU -> network frame used by the exported CFC model. */
+  return (nn_vec3_t){enu.y, enu.x, -enu.z};
 }
 
-static nn_vec3_t to_training_frame_vec(const nn_vec3_t enu)
+static int32_t motor_command_pprz(uint8_t motor_idx)
 {
-  nn_vec3_t out = enu;
-  if (nn_cfc_control_swap_xy_input) {
-    const float x = out.x;
-    out.x = out.y;
-    out.y = x;
-  }
-  if (nn_cfc_control_invert_z_input) {
-    out.z = -out.z;
-  }
-  return out;
-}
-
-static unsigned int motor_src_for_servo(uint8_t motor_idx)
-{
-  return nn_cfc_control_motor_src[motor_idx] % 4U;
-}
-
-static bool motor_invert_for_servo(uint8_t motor_idx)
-{
-  return nn_cfc_control_motor_invert[motor_idx];
-}
-
-static int32_t maybe_invert_pprz(int32_t command)
-{
-  int32_t output_min = nn_cfc_control_output_min_pprz;
-  int32_t output_max = nn_cfc_control_output_max_pprz;
-  if (output_max < output_min) {
-    const int32_t tmp = output_min;
-    output_min = output_max;
-    output_max = tmp;
-  }
-  return output_min + output_max - command;
-}
-
-static int32_t mapped_raw_motor_pprz(uint8_t motor_idx)
-{
-  const unsigned int src = motor_src_for_servo(motor_idx);
-
+  /*
+   * The network output is normalized [0,1]. We keep a RPM-scaled copy for
+   * telemetry/feedback and then map that RPM into the servo's PPRZ range.
+   */
   const float rpm = NN_CFC_MIN_RPM +
-                    nn_cfc_control_last_norm[src] * (NN_CFC_MAX_RPM - NN_CFC_MIN_RPM);
-
-  int32_t command = rpm_to_pprz_for_motor(motor_idx, rpm);
-
-  if (motor_invert_for_servo(motor_idx)) {
-    command = maybe_invert_pprz(command);
-  }
-
-  return command;
+                    nn_cfc_control_last_norm[motor_idx] * (NN_CFC_MAX_RPM - NN_CFC_MIN_RPM);
+  return rpm_to_pprz_for_motor(motor_idx, rpm);
 }
 
-static int32_t mean_mapped_raw_motor_pprz(void)
+static void update_motor_command_debug(void)
 {
   int32_t sum = 0;
   for (uint8_t i = 0U; i < 4U; i++) {
-    sum += mapped_raw_motor_pprz(i);
+    sum += motor_command_pprz(i);
   }
   nn_cfc_control_raw_mean_pprz = sum / 4;
-  return nn_cfc_control_raw_mean_pprz;
 }
 
 static int32_t direct_nn_motor_pprz(uint8_t motor_idx)
 {
-  mean_mapped_raw_motor_pprz();
-  return clamp_motor_command(mapped_raw_motor_pprz(motor_idx));
+  update_motor_command_debug();
+  return motor_command_pprz(motor_idx);
 }
 
 static float waypoint_dist2(const nn_vec3_t pos, const nn_vec3_t wp)
@@ -411,6 +302,10 @@ static float waypoint_dist2(const nn_vec3_t pos, const nn_vec3_t wp)
 
 static void update_target_debug(const nn_vec3_t pos, const nn_vec3_t wp)
 {
+  /*
+   * Keep debug values in Paparazzi ENU coordinates. These are the values the
+   * operator sees: target, current position, and target-position error.
+   */
   nn_cfc_control_target[0] = wp.x;
   nn_cfc_control_target[1] = wp.y;
   nn_cfc_control_target[2] = wp.z;
@@ -444,6 +339,11 @@ static void reset_target_debug(void)
 
 static void maybe_advance_waypoint(const nn_vec3_t pos)
 {
+  /*
+   * Waypoint switching is separate from the neural control itself. The network
+   * always receives an error to the current active waypoint; this function only
+   * decides when to move to the next waypoint in the square.
+   */
   const nn_vec3_t wp = get_square_waypoint(nn_cfc_control_waypoint_index);
   const float d2 = waypoint_dist2(pos, wp);
   const float reached_radius = nn_cfc_control_reached_radius_m > 0.f ? nn_cfc_control_reached_radius_m : 0.05f;
@@ -456,6 +356,7 @@ static void maybe_advance_waypoint(const nn_vec3_t pos)
 
 void nn_cfc_control_init(void)
 {
+  /* Module initialization: clear all exported state and reset CFC memory. */
   nn_cfc_control_enabled = false;
   nn_cfc_control_waypoint_index = 0U;
   nn_cfc_control_periodic_count = 0U;
@@ -476,13 +377,18 @@ void nn_cfc_control_init(void)
 
 void nn_cfc_control_start(void)
 {
+  /*
+   * Start is called by the flight plan. Resetting the recurrent state here is
+   * important because the CFC hidden state should not carry stale information
+   * from a previous manual/standby segment.
+   */
   nn_cfc_control_enabled = true;
   nn_cfc_control_periodic_count = 0U;
   for (unsigned int i = 0; i < 4U; i++) {
     nn_cfc_control_last_norm[i] = 0.f;
     nn_cfc_control_last_rpm[i] = NN_CFC_MIN_RPM;
-    nn_cfc_control_motor_pprz[i] = nn_cfc_control_output_min_pprz;
-    nn_cfc_control_applied_pprz[i] = nn_cfc_control_output_min_pprz;
+    nn_cfc_control_motor_pprz[i] = 0;
+    nn_cfc_control_applied_pprz[i] = 0;
     nn_cfc_control_feedback_rpm[i] = NN_CFC_MIN_RPM;
   }
   nn_cfc_control_raw_mean_pprz = 0;
@@ -493,6 +399,7 @@ void nn_cfc_control_start(void)
 
 void nn_cfc_control_stop(void)
 {
+  /* Stop neural control and return future command_law calls to autopilot PPRZ. */
   nn_cfc_control_enabled = false;
   for (unsigned int i = 0; i < 4U; i++) {
     nn_cfc_control_last_norm[i] = 0.f;
@@ -522,23 +429,17 @@ void nn_cfc_control_periodic(void)
     nn_cfc_control_error[1],
     nn_cfc_control_error[2]
   };
-  /* MUDEI AQUI EM ZE DO CAO ---------------------------------------------------------------------------------*/
   const nn_euler_t att = nn_cfc_get_attitude_rad();
-  
-  const nn_vec3_t nn_err = to_training_frame_vec(err);
-  const nn_vec3_t nn_vel = to_training_frame_vec(vel);
+
+  /* Build the first 6 network inputs from position/velocity in network frame. */
+  const nn_vec3_t nn_err = to_network_frame_vec(err);
+  const nn_vec3_t nn_vel = to_network_frame_vec(vel);
   nn_cfc_control_input_error[0] = nn_err.x;
   nn_cfc_control_input_error[1] = nn_err.y;
   nn_cfc_control_input_error[2] = nn_err.z;
   nn_cfc_control_input_velocity[0] = nn_vel.x;
   nn_cfc_control_input_velocity[1] = nn_vel.y;
   nn_cfc_control_input_velocity[2] = nn_vel.z;
-
-
-  // const nn_euler_t att = nn_cfc_get_attitude_rad();
-
-  /* MUDEI AQUI EM ZE DO CAO ---------------------------------------------------------------------------------*/
-
   const nn_vec3_t rates = nn_cfc_get_body_rates_radps();
   const nn_vec3_t mext = nn_cfc_get_external_moment_nm();
   float omega[4];
@@ -547,6 +448,7 @@ void nn_cfc_control_periodic(void)
     nn_cfc_control_feedback_rpm[i] = omega[i];
   }
 
+  /* Full input order must match nn_cfc_parameters.h exactly. */
   float state[NUM_STATES] = {
     nn_err.x, nn_err.y, nn_err.z,
     nn_vel.x, nn_vel.y, nn_vel.z,
@@ -560,15 +462,14 @@ void nn_cfc_control_periodic(void)
   float normalized_cmd[NUM_CONTROLS];
   nn_cfc_control(state, normalized_cmd);
 
+  /* Store network outputs in all useful units before command_laws consume them. */
   for (unsigned int i = 0; i < 4U; i++) {
-  nn_cfc_control_last_norm[i] = clampf(normalized_cmd[i], 0.f, 1.f);
-
-  nn_cfc_control_last_rpm[i] =
-      NN_CFC_MIN_RPM +
-      nn_cfc_control_last_norm[i] * (NN_CFC_MAX_RPM - NN_CFC_MIN_RPM);
-
-  nn_cfc_control_motor_pprz[i] =
-      rpm_to_pprz_for_motor((uint8_t)i, nn_cfc_control_last_rpm[i]);
+    nn_cfc_control_last_norm[i] = clampf(normalized_cmd[i], 0.f, 1.f);
+    nn_cfc_control_last_rpm[i] =
+        NN_CFC_MIN_RPM +
+        nn_cfc_control_last_norm[i] * (NN_CFC_MAX_RPM - NN_CFC_MIN_RPM);
+    nn_cfc_control_motor_pprz[i] =
+        rpm_to_pprz_for_motor((uint8_t)i, nn_cfc_control_last_rpm[i]);
   }
   float norm_sum = 0.f;
   int32_t pprz_sum = 0;
@@ -582,6 +483,11 @@ void nn_cfc_control_periodic(void)
 
 int32_t nn_cfc_control_get_motor_pprz(uint8_t motor_idx, int32_t autopilot_pprz)
 {
+  /*
+   * This is called from the airframe command_laws for each motor. When the
+   * module is disabled we pass through the normal autopilot command. When it is
+   * enabled we replace the motor command with the latest neural-network output.
+   */
   if (!nn_cfc_control_enabled || motor_idx >= 4U) {
     if (motor_idx < 4U) {
       nn_cfc_control_applied_pprz[motor_idx] = autopilot_pprz;

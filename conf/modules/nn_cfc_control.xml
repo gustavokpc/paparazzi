@@ -1,0 +1,75 @@
+<!DOCTYPE module SYSTEM "module.dtd">
+<module name="nn_cfc_control" dir="nn_cfc_control" task="control">
+  <doc>
+    <description>
+      End-to-end neural controller wrapper for the TU Delft Cyberzoo square waypoint test.
+      The network input order is defined in nn_cfc_parameters.h. The network output is interpreted
+      as normalized motor commands in [0,1] and exported as nn_cfc_control_motor_pprz[] and
+      nn_cfc_control_last_rpm[]. Keep the periodic task running and gate motor output with
+      nn_cfc_control_start()/nn_cfc_control_stop(). On Bebop targets the motor RPM input
+      uses the actuator board's observed RPM feedback.
+    </description>
+  </doc>
+
+  <settings>
+    <dl_settings>
+      <dl_settings name="NN CFC">
+        <dl_setting var="nn_cfc_control_enabled" min="0" step="1" max="1" shortname="enabled" values="FALSE|TRUE" type="bool" module="modules/nn_cfc_control/nn_cfc_control"/>
+        <dl_setting var="nn_cfc_control_periodic_count" min="0" step="1" max="1000000" shortname="periodic" type="uint32"/>
+        <dl_setting var="nn_cfc_control_waypoint_index" min="0" step="1" max="3" shortname="wp_idx" type="uint32"/>
+        <dl_setting var="nn_cfc_control_target[0]" min="-20" step="0.01" max="20" shortname="target_x" type="float"/>
+        <dl_setting var="nn_cfc_control_target[1]" min="-20" step="0.01" max="20" shortname="target_y" type="float"/>
+        <dl_setting var="nn_cfc_control_target[2]" min="-5" step="0.01" max="10" shortname="target_z" type="float"/>
+        <dl_setting var="nn_cfc_control_position[0]" min="-20" step="0.01" max="20" shortname="pos_x" type="float"/>
+        <dl_setting var="nn_cfc_control_position[1]" min="-20" step="0.01" max="20" shortname="pos_y" type="float"/>
+        <dl_setting var="nn_cfc_control_position[2]" min="-5" step="0.01" max="10" shortname="pos_z" type="float"/>
+        <dl_setting var="nn_cfc_control_error[0]" min="-20" step="0.01" max="20" shortname="err_x" type="float"/>
+        <dl_setting var="nn_cfc_control_error[1]" min="-20" step="0.01" max="20" shortname="err_y" type="float"/>
+        <dl_setting var="nn_cfc_control_error[2]" min="-10" step="0.01" max="10" shortname="err_z" type="float"/>
+        <dl_setting var="nn_cfc_control_input_error[0]" min="-20" step="0.01" max="20" shortname="in_dx" type="float"/>
+        <dl_setting var="nn_cfc_control_input_error[1]" min="-20" step="0.01" max="20" shortname="in_dy" type="float"/>
+        <dl_setting var="nn_cfc_control_input_error[2]" min="-10" step="0.01" max="10" shortname="in_dz" type="float"/>
+        <dl_setting var="nn_cfc_control_input_velocity[0]" min="-10" step="0.01" max="10" shortname="in_vx" type="float"/>
+        <dl_setting var="nn_cfc_control_input_velocity[1]" min="-10" step="0.01" max="10" shortname="in_vy" type="float"/>
+        <dl_setting var="nn_cfc_control_input_velocity[2]" min="-10" step="0.01" max="10" shortname="in_vz" type="float"/>
+        <dl_setting var="nn_cfc_control_dist_to_target" min="0" step="0.01" max="50" shortname="dist" type="float"/>
+        <dl_setting var="nn_cfc_control_dist_xy_to_target" min="0" step="0.01" max="50" shortname="dist_xy" type="float"/>
+        <dl_setting var="nn_cfc_control_abs_z_error" min="0" step="0.01" max="10" shortname="abs_dz" type="float"/>
+        <dl_setting var="nn_cfc_control_mean_norm" min="0" step="0.001" max="1" shortname="mean_n" type="float"/>
+        <dl_setting var="nn_cfc_control_mean_pprz" min="0" step="1" max="12000" shortname="mean_p" type="int32"/>
+        <dl_setting var="nn_cfc_control_motor_pprz[0]" min="0" step="1" max="12000" shortname="m0_pprz" type="int32"/>
+        <dl_setting var="nn_cfc_control_motor_pprz[1]" min="0" step="1" max="12000" shortname="m1_pprz" type="int32"/>
+        <dl_setting var="nn_cfc_control_motor_pprz[2]" min="0" step="1" max="12000" shortname="m2_pprz" type="int32"/>
+        <dl_setting var="nn_cfc_control_motor_pprz[3]" min="0" step="1" max="12000" shortname="m3_pprz" type="int32"/>
+        <dl_setting var="nn_cfc_control_raw_mean_pprz" min="0" step="1" max="12000" shortname="raw_mean" type="int32"/>
+        <dl_setting var="nn_cfc_control_applied_pprz[0]" min="0" step="1" max="12000" shortname="a0_pprz" type="int32"/>
+        <dl_setting var="nn_cfc_control_applied_pprz[1]" min="0" step="1" max="12000" shortname="a1_pprz" type="int32"/>
+        <dl_setting var="nn_cfc_control_applied_pprz[2]" min="0" step="1" max="12000" shortname="a2_pprz" type="int32"/>
+        <dl_setting var="nn_cfc_control_applied_pprz[3]" min="0" step="1" max="12000" shortname="a3_pprz" type="int32"/>
+        <dl_setting var="nn_cfc_control_last_norm[0]" min="0" step="0.001" max="1" shortname="m0_norm" type="float"/>
+        <dl_setting var="nn_cfc_control_last_norm[1]" min="0" step="0.001" max="1" shortname="m1_norm" type="float"/>
+        <dl_setting var="nn_cfc_control_last_norm[2]" min="0" step="0.001" max="1" shortname="m2_norm" type="float"/>
+        <dl_setting var="nn_cfc_control_last_norm[3]" min="0" step="0.001" max="1" shortname="m3_norm" type="float"/>
+        <dl_setting var="nn_cfc_control_feedback_rpm[0]" min="0" step="1" max="14000" shortname="fb0_rpm" type="float"/>
+        <dl_setting var="nn_cfc_control_feedback_rpm[1]" min="0" step="1" max="14000" shortname="fb1_rpm" type="float"/>
+        <dl_setting var="nn_cfc_control_feedback_rpm[2]" min="0" step="1" max="14000" shortname="fb2_rpm" type="float"/>
+        <dl_setting var="nn_cfc_control_feedback_rpm[3]" min="0" step="1" max="14000" shortname="fb3_rpm" type="float"/>
+      </dl_settings>
+    </dl_settings>
+  </settings>
+
+  <dep>
+    <depends>@state,@navigation,@mixing</depends>
+  </dep>
+  <header>
+    <file name="nn_cfc_control.h"/>
+  </header>
+  <init fun="nn_cfc_control_init()"/>
+  <periodic fun="nn_cfc_control_periodic()" freq="50." autorun="TRUE"/>
+
+  <makefile target="ap|nps">
+    <file name="nn_cfc_control.c"/>
+    <file name="nn_cfc_operations.c"/>
+    <file name="nn_cfc_parameters.c"/>
+  </makefile>
+</module>

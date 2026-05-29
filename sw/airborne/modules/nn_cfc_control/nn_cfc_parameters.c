@@ -1,5 +1,5 @@
 /* Generated neural-network parameters. */
-#include "nn_parameters.h"
+#include "nn_cfc_parameters.h"
 
 const float input_norm_min[19] = {
     -7.085289f, -7.04967737f, -5.812953f, -4.70970631f, -4.7874999f, -2.32903695f, -1.38556123f, -1.32969594f,

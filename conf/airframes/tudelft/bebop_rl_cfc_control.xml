@@ -1,7 +1,7 @@
 <!DOCTYPE airframe SYSTEM "../airframe.dtd">
 
-<airframe name="bebop_nn_control">
-  <description>Bebop end-to-end neural control test airframe.
+<airframe name="bebop_rl_cfc_control">
+  <description>Bebop recurrent PPO CfC control test airframe.
   </description>
 
 
@@ -32,15 +32,7 @@
     <module name="telemetry" type="transparent_udp"/>
     <module name="radio_control" type="datalink"/>
     <module name="motor_mixing"/>
-    <module name="nn_e2e_control">
-      <define name="NN_E2E_MIN_PPRZ" value="5000"/>
-      <define name="NN_E2E_MAX_PPRZ" value="10000"/>
-      <define name="NN_E2E_MIN_RPM" value="5000.0f"/>
-      <define name="NN_E2E_MAX_RPM" value="10000.0f"/>
-      <define name="NN_E2E_REACHED_RADIUS_M" value="0.6f"/>
-      <define name="NN_E2E_START_WAYPOINT_INDEX" value="1"/>
-      <define name="NN_E2E_USE_NED_INPUT" value="1"/>
-    </module>
+    <module name="rl_cfc_control"/>
     <module name="actuators" type="bebop"/>
     <module name="imu" type="bebop"/>
     <module name="gps" type="datalink"/>
@@ -79,10 +71,10 @@
   </commands>
 
   <servos driver="Default">
-    <servo name="TOP_LEFT" no="0" min="3000" neutral="3000" max="10000" />
-    <servo name="TOP_RIGHT" no="1" min="3000" neutral="3000" max="10000" />
-    <servo name="BOTTOM_RIGHT" no="2" min="3000" neutral="3000" max="10000" />
-    <servo name="BOTTOM_LEFT" no="3" min="3000" neutral="3000" max="10000" />
+    <servo name="TOP_LEFT" no="0" min="0" neutral="0" max="31475" />
+    <servo name="TOP_RIGHT" no="1" min="0" neutral="0" max="31475" />
+    <servo name="BOTTOM_RIGHT" no="2" min="0" neutral="0" max="31475" />
+    <servo name="BOTTOM_LEFT" no="3" min="0" neutral="0" max="31475" />
   </servos>
 
   <section name="MIXING" prefix="MOTOR_MIXING_">
@@ -94,10 +86,10 @@
 
   <command_laws>
     <call fun="motor_mixing_run(autopilot_get_motors_on(),FALSE,values)"/>
-    <set servo="TOP_LEFT" value="autopilot_get_motors_on() ? nn_e2e_control_get_motor_pprz(0, motor_mixing.commands[MOTOR_FRONT_LEFT]) : -MAX_PPRZ"/>
-    <set servo="TOP_RIGHT" value="autopilot_get_motors_on() ? nn_e2e_control_get_motor_pprz(1, motor_mixing.commands[MOTOR_FRONT_RIGHT]) : -MAX_PPRZ"/>
-    <set servo="BOTTOM_RIGHT" value="autopilot_get_motors_on() ? nn_e2e_control_get_motor_pprz(2, motor_mixing.commands[MOTOR_BACK_RIGHT]) : -MAX_PPRZ"/>
-    <set servo="BOTTOM_LEFT" value="autopilot_get_motors_on() ? nn_e2e_control_get_motor_pprz(3, motor_mixing.commands[MOTOR_BACK_LEFT]) : -MAX_PPRZ"/>
+    <set servo="TOP_LEFT" value="autopilot_get_motors_on() ? rl_cfc_control_get_motor_pprz(0, motor_mixing.commands[MOTOR_FRONT_LEFT]) : -MAX_PPRZ"/>
+    <set servo="TOP_RIGHT" value="autopilot_get_motors_on() ? rl_cfc_control_get_motor_pprz(1, motor_mixing.commands[MOTOR_FRONT_RIGHT]) : -MAX_PPRZ"/>
+    <set servo="BOTTOM_RIGHT" value="autopilot_get_motors_on() ? rl_cfc_control_get_motor_pprz(2, motor_mixing.commands[MOTOR_BACK_RIGHT]) : -MAX_PPRZ"/>
+    <set servo="BOTTOM_LEFT" value="autopilot_get_motors_on() ? rl_cfc_control_get_motor_pprz(3, motor_mixing.commands[MOTOR_BACK_LEFT]) : -MAX_PPRZ"/>
   </command_laws>
 
   <section name="BEBOP_FRONT_CAMERA" prefix="MT9F002_">

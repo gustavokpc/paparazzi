@@ -1,11 +1,11 @@
 /*
-File: nn_parameters.h
+File: nn_cfc_parameters.h
 Generated from: new_CFC_64_neurons_seq_1_epoch=18_val_loss=0.000142.ckpt
 Model kind: cfc_default
 Input order: dx, dy, dz, vx, vy, vz, phi, theta, psi, p, q, r, Mx_ext, My_ext, Mz_ext, omega1, omega2, omega3, omega4
 */
-#ifndef NN_PARAMETERS_H
-#define NN_PARAMETERS_H
+#ifndef NN_CFC_PARAMETERS_H
+#define NN_CFC_PARAMETERS_H
 
 #define NUM_STATES 19
 #define NUM_CONTROLS 4

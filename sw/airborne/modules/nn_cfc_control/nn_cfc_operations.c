@@ -1,8 +1,8 @@
 
-#include "nn_operations.h"
+#include "nn_cfc_operations.h"
 
 #define BN_EPS 1.0e-5f
-static float nn_hidden[HIDDEN_SIZE];
+static float nn_cfc_hidden[HIDDEN_SIZE];
 
 static inline float sigmoidf_local(float x) { return 1.0f / (1.0f + expf(-x)); }
 static inline float reluf_local(float x) { return x > 0.0f ? x : 0.0f; }
@@ -72,15 +72,15 @@ static void conv_features(const float *x, float *feat) {
     for (int i = 0; i < 256; ++i) feat[i] = 0.5f * (c4[i * 2] + c4[i * 2 + 1]);
 }
 
-void nn_reset(void) { for (int i=0;i<HIDDEN_SIZE;++i) nn_hidden[i]=0.0f; }
-void nn_control(const float *state, float *control) {
+void nn_cfc_reset(void) { for (int i=0;i<HIDDEN_SIZE;++i) nn_cfc_hidden[i]=0.0f; }
+void nn_cfc_control(const float *state, float *control) {
     float x[NUM_STATES], feat[CONV_FEATURES];
     normalize(state, x);
     conv_features(x, feat);
 
     float cat[320], bb[128], ff1[HIDDEN_SIZE];
     for (int i=0;i<CONV_FEATURES;++i) cat[i]=feat[i];
-    for (int i=0;i<HIDDEN_SIZE;++i) cat[CONV_FEATURES+i]=nn_hidden[i];
+    for (int i=0;i<HIDDEN_SIZE;++i) cat[CONV_FEATURES+i]=nn_cfc_hidden[i];
     matvec(cat, bb, rnn_rnn_cell_backbone_0_weight, rnn_rnn_cell_backbone_0_bias, 320, 128);
     for (int i=0;i<128;++i) bb[i]=lecun_tanhf(bb[i]);
     matvec(bb, ff1, rnn_rnn_cell_ff1_weight, rnn_rnn_cell_ff1_bias, 128, HIDDEN_SIZE);
@@ -89,8 +89,8 @@ void nn_control(const float *state, float *control) {
     matvec(bb, ff2, rnn_rnn_cell_ff2_weight, rnn_rnn_cell_ff2_bias, 128, HIDDEN_SIZE);
     matvec(bb, ta, rnn_rnn_cell_time_a_weight, rnn_rnn_cell_time_a_bias, 128, HIDDEN_SIZE);
     matvec(bb, tb, rnn_rnn_cell_time_b_weight, rnn_rnn_cell_time_b_bias, 128, HIDDEN_SIZE);
-    for (int i=0;i<HIDDEN_SIZE;++i) { float f1=tanhf(ff1[i]); float f2=tanhf(ff2[i]); float t=sigmoidf_local(ta[i]+tb[i]); nn_hidden[i]=f1*(1.0f-t)+t*f2; }
+    for (int i=0;i<HIDDEN_SIZE;++i) { float f1=tanhf(ff1[i]); float f2=tanhf(ff2[i]); float t=sigmoidf_local(ta[i]+tb[i]); nn_cfc_hidden[i]=f1*(1.0f-t)+t*f2; }
 
-    matvec(nn_hidden, control, rnn_fc_weight, rnn_fc_bias, HIDDEN_SIZE, NUM_CONTROLS);
+    matvec(nn_cfc_hidden, control, rnn_fc_weight, rnn_fc_bias, HIDDEN_SIZE, NUM_CONTROLS);
     clamp_output(control);
 }

@@ -1,5 +1,5 @@
 <!DOCTYPE flight_plan SYSTEM "../flight_plan.dtd">
-<flight_plan alt="1.5" ground_alt="0" lat0="51.990634" lon0="4.376789" max_dist_from_home="60" name="Bebop RL CFC square TU Delft Cyberzoo" security_height="0.4">
+<flight_plan alt="1.0" ground_alt="0" lat0="51.990634" lon0="4.376789" max_dist_from_home="60" name="Bebop RL CFC square TU Delft Cyberzoo" security_height="0.4">
 
   <!--=== Header: module and Gazebo simulation world includes ===-->
   <header>
@@ -27,10 +27,10 @@
     <waypoint name="GOAL" x="1.9" y="1.0"/>
     <waypoint name="TRAJECTORY" x="1.9" y="1.0"/>
     <!-- Square mission waypoints used by rl_cfc_control.c. Altitude is handled by the module constant. -->
-    <waypoint name="NN_SQ_1" x="1.0" y="1.0" height="1.5"/>
-    <waypoint name="NN_SQ_2" x="-1.0" y="1.0" height="1.5"/>
-    <waypoint name="NN_SQ_3" x="-1.0" y="-1.0" height="1.5"/>
-    <waypoint name="NN_SQ_4" x="1.0" y="-1.0" height="1.5"/>
+    <waypoint name="NN_SQ_1" x="1.0" y="1.0" height="1.0"/>
+    <waypoint name="NN_SQ_2" x="-1.0" y="1.0" height="1.0"/>
+    <waypoint name="NN_SQ_3" x="-1.0" y="-1.0" height="1.0"/>
+    <waypoint name="NN_SQ_4" x="1.0" y="-1.0" height="1.0"/>
     <waypoint lat="51.9905834" lon="4.3767710" name="_CZ1"/>
     <waypoint lat="51.9906440" lon="4.3767060" name="_CZ2"/>
     <waypoint lat="51.9906860" lon="4.3768080" name="_CZ3"/>

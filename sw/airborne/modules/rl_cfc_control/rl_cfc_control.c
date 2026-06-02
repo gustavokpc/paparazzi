@@ -39,7 +39,7 @@ extern int16_t actuators_pprz[] __attribute__((weak));
 #endif
 
 #ifndef RL_CFC_TARGET_ALT_M
-#define RL_CFC_TARGET_ALT_M 1.5f
+#define RL_CFC_TARGET_ALT_M 1.0f
 #endif
 
 #ifndef RL_CFC_START_WAYPOINT_INDEX

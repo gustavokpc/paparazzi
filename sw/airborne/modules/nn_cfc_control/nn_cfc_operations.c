@@ -3,6 +3,7 @@
 
 #define BN_EPS 1.0e-5f
 static float nn_cfc_hidden[HIDDEN_SIZE];
+float nn_cfc_last_raw_control[NUM_CONTROLS];
 
 static inline float sigmoidf_local(float x) { return 1.0f / (1.0f + expf(-x)); }
 static inline float reluf_local(float x) { return x > 0.0f ? x : 0.0f; }
@@ -92,5 +93,6 @@ void nn_cfc_control(const float *state, float *control) {
     for (int i=0;i<HIDDEN_SIZE;++i) { float f1=tanhf(ff1[i]); float f2=tanhf(ff2[i]); float t=sigmoidf_local(ta[i]+tb[i]); nn_cfc_hidden[i]=f1*(1.0f-t)+t*f2; }
 
     matvec(nn_cfc_hidden, control, rnn_fc_weight, rnn_fc_bias, HIDDEN_SIZE, NUM_CONTROLS);
+    for (int i=0;i<NUM_CONTROLS;++i) nn_cfc_last_raw_control[i]=control[i];
     clamp_output(control);
 }

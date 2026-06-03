@@ -39,6 +39,7 @@
       <message name="AHRS_REF_QUAT"            period="0.5"/>
       <message name="STAB_ATTITUDE"            period=".25"/>
       <message name="EFF_MAT_STAB"             period="2.0"/>
+      <message name="DEBUG_VECT"               period="0.02"/>
     </mode>
 
     <mode name="ppm">
@@ -211,4 +212,3 @@
   </process>
 
 </telemetry>
-

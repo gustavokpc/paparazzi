@@ -47,6 +47,7 @@ extern "C" {
 
 struct NpsAutopilot {
   double commands[NPS_COMMANDS_NB];
+  bool commands_are_rpm;
   bool launch;
 };
 

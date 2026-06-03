@@ -86,10 +86,11 @@
 
   <command_laws>
     <call fun="motor_mixing_run(autopilot_get_motors_on(),FALSE,values)"/>
-    <set servo="TOP_LEFT" value="autopilot_get_motors_on() ? rl_cfc_control_get_motor_pprz(0, motor_mixing.commands[MOTOR_FRONT_LEFT]) : -MAX_PPRZ"/>
-    <set servo="TOP_RIGHT" value="autopilot_get_motors_on() ? rl_cfc_control_get_motor_pprz(1, motor_mixing.commands[MOTOR_FRONT_RIGHT]) : -MAX_PPRZ"/>
-    <set servo="BOTTOM_RIGHT" value="autopilot_get_motors_on() ? rl_cfc_control_get_motor_pprz(2, motor_mixing.commands[MOTOR_BACK_RIGHT]) : -MAX_PPRZ"/>
-    <set servo="BOTTOM_LEFT" value="autopilot_get_motors_on() ? rl_cfc_control_get_motor_pprz(3, motor_mixing.commands[MOTOR_BACK_LEFT]) : -MAX_PPRZ"/>
+    <set servo="TOP_LEFT" value="motor_mixing.commands[MOTOR_FRONT_LEFT]"/>
+    <set servo="TOP_RIGHT" value="motor_mixing.commands[MOTOR_FRONT_RIGHT]"/>
+    <set servo="BOTTOM_RIGHT" value="motor_mixing.commands[MOTOR_BACK_RIGHT]"/>
+    <set servo="BOTTOM_LEFT" value="motor_mixing.commands[MOTOR_BACK_LEFT]"/>
+    <call fun="rl_cfc_control_apply_motor_rpm(autopilot_get_motors_on())"/>
   </command_laws>
 
   <section name="BEBOP_FRONT_CAMERA" prefix="MT9F002_">

@@ -57,6 +57,10 @@
 #include "modules/datalink/datalink.h"
 #include "modules/actuators/actuators.h"
 
+#if defined(MODULE_NN_CFC_CONTROL_ID) && defined(NPS_NN_CFC_DIRECT_RPM)
+#include "modules/nn_cfc_control/nn_cfc_control.h"
+#endif
+
 struct NpsAutopilot nps_autopilot;
 bool nps_bypass_ahrs;
 bool nps_bypass_ins;
@@ -69,6 +73,10 @@ bool nps_bypass_ins;
 #define NPS_BYPASS_INS FALSE
 #endif
 
+#ifndef NPS_NN_CFC_DIRECT_RPM
+#define NPS_NN_CFC_DIRECT_RPM FALSE
+#endif
+
 #if INDI_RPM_FEEDBACK
 #error "INDI_RPM_FEEDBACK can not be used in simulation!"
 #endif
@@ -78,6 +86,7 @@ void sys_tick_handler(void);
 void nps_autopilot_init(enum NpsRadioControlType type_rc, int num_rc_script, char *rc_dev)
 {
   nps_autopilot.launch = TRUE;
+  nps_autopilot.commands_are_rpm = false;
 
   nps_radio_control_init(type_rc, num_rc_script, rc_dev);
   nps_electrical_init();
@@ -173,7 +182,18 @@ void nps_autopilot_run_step(double time)
   main_ap_periodic();
 
   /* scale final motor commands to 0-1 for feeding the fdm */
+#if defined(MODULE_NN_CFC_CONTROL_ID) && NPS_NN_CFC_DIRECT_RPM
+  nps_autopilot.commands_are_rpm = nn_cfc_control_enabled;
+#else
+  nps_autopilot.commands_are_rpm = false;
+#endif
   for (uint8_t i = 0; i < NPS_COMMANDS_NB; i++) {
+#if defined(MODULE_NN_CFC_CONTROL_ID) && NPS_NN_CFC_DIRECT_RPM
+    if (nps_autopilot.commands_are_rpm) {
+      nps_autopilot.commands[i] = autopilot_get_motors_on() ? (double)nn_cfc_control_motor_rpm_cmd[i] : 0.0;
+      continue;
+    }
+#endif
 #if NPS_NO_MOTOR_MIXING
     #if NPS_USE_COMMANDS
     commands[i] = autopilot_get_motors_on() ? commands[i] : 0;

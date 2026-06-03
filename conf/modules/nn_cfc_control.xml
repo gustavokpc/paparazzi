@@ -17,14 +17,9 @@
         <dl_setting var="nn_cfc_control_periodic_count" min="0" step="1" max="1000000" shortname="periodic" type="uint32"/>
         <dl_setting var="nn_cfc_control_waypoint_switch_count" min="0" step="1" max="1000000" shortname="wp_sw" type="uint32"/>
         <dl_setting var="nn_cfc_control_waypoint_index" min="0" step="1" max="3" shortname="wp_idx" type="uint32"/>
-        <dl_setting var="nn_cfc_control_rpm_scale" min="0.5" step="0.01" max="1.5" shortname="rpm_s" type="float"/>
-        <dl_setting var="nn_cfc_control_rpm_bias" min="-1000" step="25" max="1000" shortname="rpm_b" type="float"/>
-        <dl_setting var="nn_cfc_control_target[0]" min="-20" step="0.01" max="20" shortname="target_x" type="float"/>
-        <dl_setting var="nn_cfc_control_target[1]" min="-20" step="0.01" max="20" shortname="target_y" type="float"/>
-        <dl_setting var="nn_cfc_control_target[2]" min="-5" step="0.01" max="10" shortname="target_z" type="float"/>
-        <dl_setting var="nn_cfc_control_position[0]" min="-20" step="0.01" max="20" shortname="pos_x" type="float"/>
-        <dl_setting var="nn_cfc_control_position[1]" min="-20" step="0.01" max="20" shortname="pos_y" type="float"/>
-        <dl_setting var="nn_cfc_control_position[2]" min="-5" step="0.01" max="10" shortname="pos_z" type="float"/>
+        <dl_setting var="nn_cfc_control_hover_rpm_training" min="5000" step="100" max="10000" shortname="hover_train" type="float"/>
+        <dl_setting var="nn_cfc_control_hover_rpm_gazebo" min="5000" step="100" max="10000" shortname="hover_gazebo" type="float"/>
+        <dl_setting var="nn_cfc_control_rpm_delta_scale" min="0.5" step="0.01" max="1.5" shortname="rpm_d_scale" type="float"/>
         <dl_setting var="nn_cfc_control_error[0]" min="-20" step="0.01" max="20" shortname="err_x" type="float"/>
         <dl_setting var="nn_cfc_control_error[1]" min="-20" step="0.01" max="20" shortname="err_y" type="float"/>
         <dl_setting var="nn_cfc_control_error[2]" min="-10" step="0.01" max="10" shortname="err_z" type="float"/>
@@ -61,6 +56,16 @@
         <dl_setting var="nn_cfc_control_net_output_raw[1]" min="-2" step="0.001" max="2" shortname="raw1" type="float"/>
         <dl_setting var="nn_cfc_control_net_output_raw[2]" min="-2" step="0.001" max="2" shortname="raw2" type="float"/>
         <dl_setting var="nn_cfc_control_net_output_raw[3]" min="-2" step="0.001" max="2" shortname="raw3" type="float"/>
+        <dl_setting var="nn_cfc_control_net_output_norm[0]" min="0" step="0.001" max="1" shortname="out0_n" type="float"/>
+        <dl_setting var="nn_cfc_control_net_output_norm[1]" min="0" step="0.001" max="1" shortname="out1_n" type="float"/>
+        <dl_setting var="nn_cfc_control_net_output_norm[2]" min="0" step="0.001" max="1" shortname="out2_n" type="float"/>
+        <dl_setting var="nn_cfc_control_net_output_norm[3]" min="0" step="0.001" max="1" shortname="out3_n" type="float"/>
+        <dl_setting var="nn_cfc_control_net_input_normalized[2]" min="-1" step="0.001" max="2" shortname="dz_n" type="float"/>
+        <dl_setting var="nn_cfc_control_net_input_normalized[5]" min="-1" step="0.001" max="2" shortname="vz_n" type="float"/>
+        <dl_setting var="nn_cfc_control_net_input_normalized[15]" min="-1" step="0.001" max="2" shortname="om0_n" type="float"/>
+        <dl_setting var="nn_cfc_control_net_input_normalized[16]" min="-1" step="0.001" max="2" shortname="om1_n" type="float"/>
+        <dl_setting var="nn_cfc_control_net_input_normalized[17]" min="-1" step="0.001" max="2" shortname="om2_n" type="float"/>
+        <dl_setting var="nn_cfc_control_net_input_normalized[18]" min="-1" step="0.001" max="2" shortname="om3_n" type="float"/>
         <dl_setting var="nn_cfc_control_feedback_rpm[0]" min="0" step="1" max="14000" shortname="fb0_rpm" type="float"/>
         <dl_setting var="nn_cfc_control_feedback_rpm[1]" min="0" step="1" max="14000" shortname="fb1_rpm" type="float"/>
         <dl_setting var="nn_cfc_control_feedback_rpm[2]" min="0" step="1" max="14000" shortname="fb2_rpm" type="float"/>

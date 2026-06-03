@@ -7,11 +7,11 @@
  *   rl_cfc_parameters.h:
  *   pos_G, vel_G, euler_B_to_G, rates_B, motor_state, next_gate_G.
  * - The RL policy returns actions in [-1,1]. In the training environment these
- *   actions command steady-state motor speed in rad/s. The Bebop actuator driver
- *   ultimately sends reference motor speed in RPM, while Paparazzi command laws
- *   pass values through the generic PPRZ actuator scaling.
- * - Motor commands are applied from the airframe command_laws through
- *   rl_cfc_control_get_motor_pprz(); motor mapping constants live here.
+ *   actions command steady-state motor speed in rad/s through the same nonlinear
+ *   action curve implemented below.
+ * - The wrapper converts that trained rad/s command directly to Bebop reference
+ *   RPM and applies it with actuators_bebop_set(), matching the working CFC
+ *   direct-RPM path.
  */
 
 #include "modules/rl_cfc_control/rl_cfc_control.h"
@@ -32,18 +32,16 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-extern int16_t actuators_pprz[] __attribute__((weak));
-
 #ifndef RL_CFC_REACHED_RADIUS_M
-#define RL_CFC_REACHED_RADIUS_M 0.6f
+#define RL_CFC_REACHED_RADIUS_M 1.6f
 #endif
 
 #ifndef RL_CFC_TARGET_ALT_M
-#define RL_CFC_TARGET_ALT_M 1.0f
+#define RL_CFC_TARGET_ALT_M 1.5f
 #endif
 
 #ifndef RL_CFC_START_WAYPOINT_INDEX
-#define RL_CFC_START_WAYPOINT_INDEX 0
+#define RL_CFC_START_WAYPOINT_INDEX 7
 #endif
 
 /* RL motor model training scale. The policy/env use rad/s, Bebop feedback uses RPM. */
@@ -66,50 +64,12 @@ extern int16_t actuators_pprz[] __attribute__((weak));
 #define RL_CFC_MAX_RPM (RL_CFC_MAX_RADPS * RL_CFC_RADPS_TO_RPM)
 #endif
 
-#ifndef RL_CFC_MIN_PPRZ
-#define RL_CFC_MIN_PPRZ 4500
+#ifndef RL_CFC_NPS_MIN_RPM
+#define RL_CFC_NPS_MIN_RPM 0.0f
 #endif
 
-#ifndef RL_CFC_MAX_PPRZ
-#define RL_CFC_MAX_PPRZ MAX_PPRZ
-#endif
-
-/*
- * Training dynamics motor order inferred from:
- * Mx = -W1 -W2 +W3 +W4, My = -W1 +W2 -W3 +W4
- * => W1=back-right, W2=front-right, W3=back-left, W4=front-left.
- * Paparazzi/Bebop servo order here is FL, FR, BR, BL.
- */
-#ifndef RL_CFC_MOTOR_0_SRC
-#define RL_CFC_MOTOR_0_SRC 0
-#endif
-
-#ifndef RL_CFC_MOTOR_1_SRC
-#define RL_CFC_MOTOR_1_SRC 1
-#endif
-
-#ifndef RL_CFC_MOTOR_2_SRC
-#define RL_CFC_MOTOR_2_SRC 2
-#endif
-
-#ifndef RL_CFC_MOTOR_3_SRC
-#define RL_CFC_MOTOR_3_SRC 3
-#endif
-
-#ifndef RL_CFC_MOTOR_0_INVERT
-#define RL_CFC_MOTOR_0_INVERT 0
-#endif
-
-#ifndef RL_CFC_MOTOR_1_INVERT
-#define RL_CFC_MOTOR_1_INVERT 0
-#endif
-
-#ifndef RL_CFC_MOTOR_2_INVERT
-#define RL_CFC_MOTOR_2_INVERT 0
-#endif
-
-#ifndef RL_CFC_MOTOR_3_INVERT
-#define RL_CFC_MOTOR_3_INVERT 0
+#ifndef RL_CFC_NPS_MAX_RPM
+#define RL_CFC_NPS_MAX_RPM RL_CFC_MAX_RPM
 #endif
 
 #ifndef RL_CFC_USE_NED_INPUT
@@ -124,16 +84,16 @@ extern int16_t actuators_pprz[] __attribute__((weak));
 #define RL_CFC_ACTION_CURVE_K 0.95f
 #endif
 
-#ifndef RL_CFC_TRAIN_K_W
-#define RL_CFC_TRAIN_K_W 2.49e-6f
+#ifndef RL_CFC_TORQUE_SCALE
+#define RL_CFC_TORQUE_SCALE 1.0f
 #endif
 
-#ifndef RL_CFC_TRAIN_GRAVITY
-#define RL_CFC_TRAIN_GRAVITY 9.81f
+#ifndef RL_CFC_OBS_Z_SIGN
+#define RL_CFC_OBS_Z_SIGN 1.0f
 #endif
 
-#ifndef RL_CFC_REAL_HOVER_PPRZ
-#define RL_CFC_REAL_HOVER_PPRZ 6500.0f
+#ifndef RL_CFC_OBS_VZ_SIGN
+#define RL_CFC_OBS_VZ_SIGN 1.0f
 #endif
 
 #ifndef RL_CFC_OBS_ROLL_SIGN
@@ -160,22 +120,6 @@ extern int16_t actuators_pprz[] __attribute__((weak));
 #define RL_CFC_OBS_R_SIGN 1.0f
 #endif
 
-#ifndef RL_CFC_GATE_0_YAW
-#define RL_CFC_GATE_0_YAW 0.0f
-#endif
-
-#ifndef RL_CFC_GATE_1_YAW
-#define RL_CFC_GATE_1_YAW 0.0f
-#endif
-
-#ifndef RL_CFC_GATE_2_YAW
-#define RL_CFC_GATE_2_YAW 0.0f
-#endif
-
-#ifndef RL_CFC_GATE_3_YAW
-#define RL_CFC_GATE_3_YAW 0.0f
-#endif
-
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
 #endif
@@ -196,26 +140,12 @@ bool rl_cfc_control_enabled = false;
 unsigned int rl_cfc_control_waypoint_index = 0;
 float rl_cfc_control_last_norm[4] = {0.f, 0.f, 0.f, 0.f};
 float rl_cfc_control_last_rpm[4] = {0.f, 0.f, 0.f, 0.f};
-int32_t rl_cfc_control_motor_pprz[4] = {0, 0, 0, 0};
-int32_t rl_cfc_control_applied_pprz[4] = {0, 0, 0, 0};
-int32_t rl_cfc_control_raw_mean_pprz = 0;
+int32_t rl_cfc_control_motor_rpm_cmd[4] = {0, 0, 0, 0};
+int32_t rl_cfc_control_applied_rpm_cmd[4] = {0, 0, 0, 0};
+int32_t rl_cfc_control_raw_mean_rpm = 0;
 unsigned int rl_cfc_control_periodic_count = 0U;
 float rl_cfc_control_reached_radius_m = RL_CFC_REACHED_RADIUS_M;
-int32_t rl_cfc_control_output_min_pprz = RL_CFC_MIN_PPRZ;
-int32_t rl_cfc_control_output_max_pprz = RL_CFC_MAX_PPRZ;
 bool rl_cfc_control_use_ned_input = RL_CFC_USE_NED_INPUT;
-uint8_t rl_cfc_control_motor_src[4] = {
-  RL_CFC_MOTOR_3_SRC,
-  RL_CFC_MOTOR_1_SRC,
-  RL_CFC_MOTOR_0_SRC,
-  RL_CFC_MOTOR_2_SRC
-};
-bool rl_cfc_control_motor_invert[4] = {
-  RL_CFC_MOTOR_0_INVERT,
-  RL_CFC_MOTOR_1_INVERT,
-  RL_CFC_MOTOR_2_INVERT,
-  RL_CFC_MOTOR_3_INVERT
-};
 float rl_cfc_control_target[3] = {0.f, 0.f, 0.f};
 float rl_cfc_control_error[3] = {0.f, 0.f, 0.f};
 float rl_cfc_control_input_error[3] = {0.f, 0.f, 0.f};
@@ -223,38 +153,56 @@ float rl_cfc_control_input_velocity[3] = {0.f, 0.f, 0.f};
 float rl_cfc_control_feedback_rpm[4] = {0.f, 0.f, 0.f, 0.f};
 float rl_cfc_control_motor_state[4] = {0.f, 0.f, 0.f, 0.f};
 float rl_cfc_control_commanded_radps[4] = {0.f, 0.f, 0.f, 0.f};
-float rl_cfc_control_actuator_scale = 1.f;
+float rl_cfc_control_torque_scale = RL_CFC_TORQUE_SCALE;
+float rl_cfc_control_z_sign = RL_CFC_OBS_Z_SIGN;
+float rl_cfc_control_vz_sign = RL_CFC_OBS_VZ_SIGN;
+float rl_cfc_control_mean_policy_rpm = 0.f;
+float rl_cfc_control_mean_commanded_radps = 0.f;
 float rl_cfc_control_raw_action[4] = {0.f, 0.f, 0.f, 0.f};
 float rl_cfc_control_action[4] = {0.f, 0.f, 0.f, 0.f};
 float rl_cfc_control_policy_raw_action[4] = {0.f, 0.f, 0.f, 0.f};
 float rl_cfc_control_obs[20] = {0.f};
 float rl_cfc_control_next_gate[4] = {0.f, 0.f, 0.f, 0.f};
-float rl_cfc_control_gate_yaw[4] = {
-  RL_CFC_GATE_0_YAW,
-  RL_CFC_GATE_1_YAW,
-  RL_CFC_GATE_2_YAW,
-  RL_CFC_GATE_3_YAW
+float rl_cfc_control_gate_yaw[8] = {
+  0.5f * (float)M_PI,
+  (float)M_PI,
+  0.5f * (float)M_PI,
+  0.0f,
+  -0.5f * (float)M_PI,
+  -(float)M_PI,
+  -0.5f * (float)M_PI,
+  0.0f
 };
 float rl_cfc_control_dist_to_target = 0.f;
 
-/* Square in local coordinates. Keep it inside the Cyberzoo geofence. */
-static const rl_vec3_t rl_square_waypoints[] = {
-  { 1.0f,  1.0f, RL_CFC_TARGET_ALT_M},
-  {-1.0f,  1.0f, RL_CFC_TARGET_ALT_M},
-  {-1.0f, -1.0f, RL_CFC_TARGET_ALT_M},
-  { 1.0f, -1.0f, RL_CFC_TARGET_ALT_M},
+/*
+ * Figure-eight gate centers from the RL environment.
+ * RL world uses z-down. This table is stored in Paparazzi ENU as:
+ *   enu = {rl_y, rl_x, -rl_z}
+ * so enu_to_ned_vec(current - gate) recreates the raw RL world position error.
+ */
+static const rl_vec3_t rl_figure_eight_waypoints[] = {
+  {-1.5f,  1.5f, RL_CFC_TARGET_ALT_M},
+  { 0.0f,  0.0f, RL_CFC_TARGET_ALT_M},
+  { 1.5f, -1.5f, RL_CFC_TARGET_ALT_M},
+  { 3.0f,  0.0f, RL_CFC_TARGET_ALT_M},
+  { 1.5f,  1.5f, RL_CFC_TARGET_ALT_M},
+  { 0.0f,  0.0f, RL_CFC_TARGET_ALT_M},
+  {-1.5f, -1.5f, RL_CFC_TARGET_ALT_M},
+  {-3.0f,  0.0f, RL_CFC_TARGET_ALT_M},
 };
-static const unsigned int rl_num_square_waypoints = sizeof(rl_square_waypoints) / sizeof(rl_square_waypoints[0]);
+static const unsigned int rl_num_figure_eight_waypoints =
+    sizeof(rl_figure_eight_waypoints) / sizeof(rl_figure_eight_waypoints[0]);
 
-static rl_vec3_t get_square_waypoint(unsigned int index)
+/*
+ * Policy motor order: BR, FR, BL, FL.
+ * Paparazzi/Bebop servo order: FL, FR, BR, BL.
+ */
+static const uint8_t rl_motor_src_for_servo[4] = {3U, 1U, 0U, 2U};
+
+static rl_vec3_t get_figure_eight_waypoint(unsigned int index)
 {
-#if defined(WP_NN_SQ_1) && defined(WP_NN_SQ_2) && defined(WP_NN_SQ_3) && defined(WP_NN_SQ_4)
-  static const uint8_t wp_ids[] = {WP_NN_SQ_1, WP_NN_SQ_2, WP_NN_SQ_3, WP_NN_SQ_4};
-  const uint8_t wp_id = wp_ids[index % (sizeof(wp_ids) / sizeof(wp_ids[0]))];
-  return (rl_vec3_t){waypoint_get_x(wp_id), waypoint_get_y(wp_id), waypoint_get_alt(wp_id)};
-#else
-  return rl_square_waypoints[index % rl_num_square_waypoints];
-#endif
+  return rl_figure_eight_waypoints[index % rl_num_figure_eight_waypoints];
 }
 
 __attribute__((weak)) rl_vec3_t rl_cfc_get_position_m(void)
@@ -314,79 +262,14 @@ static float wrap_pi(float x)
   return x;
 }
 
-static float train_command_u_to_radps(float u);
-
-static float train_hover_radps(void)
+static float train_radps_to_rpm(float radps)
 {
-  return sqrtf(RL_CFC_TRAIN_GRAVITY / (4.0f * RL_CFC_TRAIN_K_W));
-}
-
-static float train_radps_to_command_u(float radps)
-{
-  const float y = clampf((radps - RL_CFC_MIN_RADPS) / (RL_CFC_MAX_RADPS - RL_CFC_MIN_RADPS), 0.f, 1.f);
-  const float curved = y * y;
-  const float b = 1.f - RL_CFC_ACTION_CURVE_K;
-  const float disc = b * b + 4.f * RL_CFC_ACTION_CURVE_K * curved;
-  if (RL_CFC_ACTION_CURVE_K <= 0.f) {
-    return clampf(curved / b, 0.f, 1.f);
-  }
-  return clampf((-b + sqrtf(disc > 0.f ? disc : 0.f)) / (2.f * RL_CFC_ACTION_CURVE_K), 0.f, 1.f);
-}
-
-static float train_hover_u(void)
-{
-  return train_radps_to_command_u(train_hover_radps());
-}
-
-static float real_hover_u(void)
-{
-  return clampf(RL_CFC_REAL_HOVER_PPRZ / (float)MAX_PPRZ, 0.f, 1.f);
-}
-
-static float actuator_scale(void)
-{
-  const float train_u = train_hover_u();
-  if (train_u <= 0.f) {
-    return 1.f;
-  }
-  return real_hover_u() / train_u;
-}
-
-static float train_u_to_real_u(float train_u)
-{
-  train_u = clampf(train_u, 0.f, 1.f);
-  const float th = train_hover_u();
-  const float rh = real_hover_u();
-  if (train_u <= th) {
-    return th > 0.f ? rh * train_u / th : 0.f;
-  }
-  return rh + (1.f - rh) * (train_u - th) / (1.f - th);
-}
-
-static float real_u_to_train_u(float real_u)
-{
-  real_u = clampf(real_u, 0.f, 1.f);
-  const float th = train_hover_u();
-  const float rh = real_hover_u();
-  if (real_u <= rh) {
-    return rh > 0.f ? th * real_u / rh : 0.f;
-  }
-  return th + (1.f - th) * (real_u - rh) / (1.f - rh);
-}
-
-static float train_radps_to_bebop_rpm(float radps)
-{
-  return train_u_to_real_u(train_radps_to_command_u(radps)) * RL_CFC_MAX_RPM;
-}
-
-static float bebop_rpm_to_train_radps(float rpm)
-{
-  return train_command_u_to_radps(real_u_to_train_u(rpm / RL_CFC_MAX_RPM));
+  return clampf(radps, RL_CFC_MIN_RADPS, RL_CFC_MAX_RADPS) * RL_CFC_RADPS_TO_RPM;
 }
 
 static float rpm_to_motor_state(float rpm)
 {
-  const float radps = bebop_rpm_to_train_radps(rpm);
+  const float radps = rpm * RL_CFC_RPM_TO_RADPS;
   return 2.0f * radps / RL_CFC_MOTOR_STATE_MAX_RADPS - 1.0f;
 }
 
@@ -415,83 +298,6 @@ static float train_command_u_to_radps(float u)
       * sqrtf(clampf(curved, 0.f, 1.f));
 }
 
-static void get_motor_driver_range(uint8_t motor_idx, int32_t *min, int32_t *neutral, int32_t *max)
-{
-  switch (motor_idx) {
-#ifdef SERVO_TOP_LEFT_IDX
-    case SERVO_TOP_LEFT_IDX:
-      *min = SERVO_TOP_LEFT_MIN;
-      *neutral = SERVO_TOP_LEFT_NEUTRAL;
-      *max = SERVO_TOP_LEFT_MAX;
-      return;
-#endif
-#ifdef SERVO_TOP_RIGHT_IDX
-    case SERVO_TOP_RIGHT_IDX:
-      *min = SERVO_TOP_RIGHT_MIN;
-      *neutral = SERVO_TOP_RIGHT_NEUTRAL;
-      *max = SERVO_TOP_RIGHT_MAX;
-      return;
-#endif
-#ifdef SERVO_BOTTOM_RIGHT_IDX
-    case SERVO_BOTTOM_RIGHT_IDX:
-      *min = SERVO_BOTTOM_RIGHT_MIN;
-      *neutral = SERVO_BOTTOM_RIGHT_NEUTRAL;
-      *max = SERVO_BOTTOM_RIGHT_MAX;
-      return;
-#endif
-#ifdef SERVO_BOTTOM_LEFT_IDX
-    case SERVO_BOTTOM_LEFT_IDX:
-      *min = SERVO_BOTTOM_LEFT_MIN;
-      *neutral = SERVO_BOTTOM_LEFT_NEUTRAL;
-      *max = SERVO_BOTTOM_LEFT_MAX;
-      return;
-#endif
-    default:
-      *min = 0;
-      *neutral = 0;
-      *max = (int32_t)(RL_CFC_MAX_RPM + 0.5f);
-      return;
-  }
-}
-
-static int32_t rpm_to_pprz_for_motor(uint8_t motor_idx, float rpm)
-{
-  int32_t min;
-  int32_t neutral;
-  int32_t max;
-  get_motor_driver_range(motor_idx, &min, &neutral, &max);
-
-  rpm = clampf(rpm, (float)min, (float)max);
-  float pprz = 0.f;
-  if (rpm >= (float)neutral) {
-    const float travel = (float)(max - neutral);
-    pprz = travel > 0.f ? (rpm - (float)neutral) * (float)MAX_PPRZ / travel : 0.f;
-  } else {
-    const float travel = (float)(neutral - min);
-    pprz = travel > 0.f ? (rpm - (float)neutral) * (float)MAX_PPRZ / travel : 0.f;
-  }
-
-  return TRIM_PPRZ((int32_t)(pprz >= 0.f ? pprz + 0.5f : pprz - 0.5f));
-}
-
-static int32_t clamp_motor_command(int32_t command)
-{
-  int32_t output_min = rl_cfc_control_output_min_pprz;
-  int32_t output_max = rl_cfc_control_output_max_pprz;
-  if (output_max < output_min) {
-    const int32_t tmp = output_min;
-    output_min = output_max;
-    output_max = tmp;
-  }
-  if (command < output_min) {
-    return output_min;
-  }
-  if (command > output_max) {
-    return output_max;
-  }
-  return command;
-}
-
 static rl_vec3_t enu_to_ned_vec(const rl_vec3_t enu)
 {
   return (rl_vec3_t){enu.y, enu.x, -enu.z};
@@ -499,50 +305,64 @@ static rl_vec3_t enu_to_ned_vec(const rl_vec3_t enu)
 
 static unsigned int motor_src_for_servo(uint8_t motor_idx)
 {
-  return rl_cfc_control_motor_src[motor_idx] % 4U;
+  return rl_motor_src_for_servo[motor_idx] % 4U;
 }
 
-static bool motor_invert_for_servo(uint8_t motor_idx)
+static float mapped_motor_rpm(uint8_t motor_idx)
 {
-  return rl_cfc_control_motor_invert[motor_idx];
+  return rl_cfc_control_last_rpm[motor_src_for_servo(motor_idx)];
 }
 
-static int32_t maybe_invert_pprz(int32_t command)
+static float mean_policy_rpm(void)
 {
-  int32_t output_min = rl_cfc_control_output_min_pprz;
-  int32_t output_max = rl_cfc_control_output_max_pprz;
-  if (output_max < output_min) {
-    const int32_t tmp = output_min;
-    output_min = output_max;
-    output_max = tmp;
+  float sum = 0.f;
+  for (uint8_t i = 0U; i < 4U; i++) {
+    sum += rl_cfc_control_last_rpm[i];
   }
-  return output_min + output_max - command;
+  return sum * 0.25f;
 }
 
-static int32_t mapped_raw_motor_pprz(uint8_t motor_idx)
+static float scaled_mapped_motor_rpm(uint8_t motor_idx)
 {
-  const unsigned int src = motor_src_for_servo(motor_idx);
-  int32_t command = rpm_to_pprz_for_motor(motor_idx, rl_cfc_control_last_rpm[src]);
-  if (motor_invert_for_servo(motor_idx)) {
-    command = maybe_invert_pprz(command);
-  }
-  return command;
+  const float mean = mean_policy_rpm();
+  const float scale = clampf(rl_cfc_control_torque_scale, 0.f, 1.f);
+  const float rpm = mapped_motor_rpm(motor_idx);
+  return mean + scale * (rpm - mean);
 }
 
-static int32_t mean_mapped_raw_motor_pprz(void)
+static int32_t rpm_to_command(float rpm)
+{
+  rpm = clampf(rpm, RL_CFC_MIN_RPM, RL_CFC_MAX_RPM);
+  return (int32_t)(rpm >= 0.f ? rpm + 0.5f : rpm - 0.5f);
+}
+
+static int32_t mean_mapped_raw_motor_rpm(void)
 {
   int32_t sum = 0;
   for (uint8_t i = 0U; i < 4U; i++) {
-    sum += mapped_raw_motor_pprz(i);
+    sum += rpm_to_command(scaled_mapped_motor_rpm(i));
   }
-  rl_cfc_control_raw_mean_pprz = sum / 4;
-  return rl_cfc_control_raw_mean_pprz;
+  rl_cfc_control_raw_mean_rpm = sum / 4;
+  return rl_cfc_control_raw_mean_rpm;
 }
 
-static int32_t direct_rl_motor_pprz(uint8_t motor_idx)
+static int32_t rpm_to_nps_command(float rpm)
 {
-  mean_mapped_raw_motor_pprz();
-  return clamp_motor_command(mapped_raw_motor_pprz(motor_idx));
+  const float nps_min = RL_CFC_NPS_MIN_RPM;
+  const float nps_max = RL_CFC_NPS_MAX_RPM > nps_min ? RL_CFC_NPS_MAX_RPM : RL_CFC_MAX_RPM;
+  const float norm = (clampf(rpm, nps_min, nps_max) - nps_min) / (nps_max - nps_min);
+  return TRIM_PPRZ((int32_t)(norm * (float)MAX_PPRZ + 0.5f));
+}
+
+static void apply_motor_rpm(uint8_t motor_idx, int32_t rpm)
+{
+#ifndef BOARD_BEBOP
+  if (motor_idx < MOTOR_MIXING_NB_MOTOR) {
+    motor_mixing.commands[motor_idx] = rpm_to_nps_command((float)rpm);
+  }
+#else
+  actuators_bebop_set(motor_idx, (int16_t)rpm);
+#endif
 }
 
 static float waypoint_dist2(const rl_vec3_t pos, const rl_vec3_t wp)
@@ -551,6 +371,50 @@ static float waypoint_dist2(const rl_vec3_t pos, const rl_vec3_t wp)
   const float dy = wp.y - pos.y;
   const float dz = wp.z - pos.z;
   return dx * dx + dy * dy + dz * dz;
+}
+
+static float waypoint_xy_dist2(const rl_vec3_t a, const rl_vec3_t b)
+{
+  const float dx = a.x - b.x;
+  const float dy = a.y - b.y;
+  return dx * dx + dy * dy;
+}
+
+static unsigned int choose_initial_waypoint(const rl_vec3_t pos)
+{
+#if RL_CFC_START_WAYPOINT_INDEX >= 0
+  (void)pos;
+  return (unsigned int)RL_CFC_START_WAYPOINT_INDEX % rl_num_figure_eight_waypoints;
+#else
+  unsigned int best_any = 0U;
+  unsigned int best_behind = 0U;
+  float best_any_d2 = 1.0e9f;
+  float best_behind_d2 = 1.0e9f;
+  bool found_behind = false;
+  const rl_vec3_t rl_pos = enu_to_ned_vec(pos);
+
+  for (unsigned int i = 0U; i < rl_num_figure_eight_waypoints; i++) {
+    const rl_vec3_t wp = get_figure_eight_waypoint(i);
+    const float d2 = waypoint_xy_dist2(pos, wp);
+    if (d2 < best_any_d2) {
+      best_any_d2 = d2;
+      best_any = i;
+    }
+
+    const rl_vec3_t rl_wp = enu_to_ned_vec(wp);
+    const float gate_yaw = rl_cfc_control_gate_yaw[i];
+    const float projected =
+        (rl_pos.x - rl_wp.x) * cosf(gate_yaw)
+        + (rl_pos.y - rl_wp.y) * sinf(gate_yaw);
+    if (projected < 0.f && d2 < best_behind_d2) {
+      best_behind_d2 = d2;
+      best_behind = i;
+      found_behind = true;
+    }
+  }
+
+  return found_behind ? best_behind : best_any;
+#endif
 }
 
 static void update_target_debug(const rl_vec3_t pos, const rl_vec3_t wp)
@@ -567,14 +431,14 @@ static void update_target_debug(const rl_vec3_t pos, const rl_vec3_t wp)
 
 static void update_next_gate_debug(unsigned int waypoint_index)
 {
-  const rl_vec3_t current_wp = get_square_waypoint(waypoint_index);
-  const rl_vec3_t next_wp = get_square_waypoint(waypoint_index + 1U);
+  const rl_vec3_t current_wp = get_figure_eight_waypoint(waypoint_index);
+  const rl_vec3_t next_wp = get_figure_eight_waypoint(waypoint_index + 1U);
   rl_vec3_t next_rel = {
     next_wp.x - current_wp.x,
     next_wp.y - current_wp.y,
     next_wp.z - current_wp.z
   };
-  const float gate_yaw = rl_cfc_control_gate_yaw[waypoint_index % rl_num_square_waypoints];
+  const float gate_yaw = rl_cfc_control_gate_yaw[waypoint_index % rl_num_figure_eight_waypoints];
   if (rl_cfc_control_use_ned_input) {
     next_rel = enu_to_ned_vec(next_rel);
   }
@@ -583,7 +447,8 @@ static void update_next_gate_debug(unsigned int waypoint_index)
   rl_cfc_control_next_gate[0] = next_rel.x;
   rl_cfc_control_next_gate[1] = next_rel.y;
   rl_cfc_control_next_gate[2] = next_rel.z;
-  rl_cfc_control_next_gate[3] = wrap_pi(rl_cfc_control_gate_yaw[(waypoint_index + 1U) % rl_num_square_waypoints] - gate_yaw);
+  rl_cfc_control_next_gate[3] =
+      wrap_pi(rl_cfc_control_gate_yaw[(waypoint_index + 1U) % rl_num_figure_eight_waypoints] - gate_yaw);
 }
 
 static void reset_target_debug(void)
@@ -609,14 +474,14 @@ static void reset_target_debug(void)
 
 static void maybe_advance_waypoint(const rl_vec3_t pos)
 {
-  const rl_vec3_t wp = get_square_waypoint(rl_cfc_control_waypoint_index);
+  const rl_vec3_t wp = get_figure_eight_waypoint(rl_cfc_control_waypoint_index);
   const float d2 = waypoint_dist2(pos, wp);
   const float reached_radius = rl_cfc_control_reached_radius_m > 0.f ? rl_cfc_control_reached_radius_m : 0.05f;
   if (d2 < reached_radius * reached_radius) {
-    rl_cfc_control_waypoint_index = (rl_cfc_control_waypoint_index + 1U) % rl_num_square_waypoints;
-    // rl_cfc_reset();  /* Optional but usually cleaner when changing target. */
+    rl_cfc_control_waypoint_index = (rl_cfc_control_waypoint_index + 1U) % rl_num_figure_eight_waypoints;
+    rl_cfc_reset();
   }
-  update_target_debug(pos, get_square_waypoint(rl_cfc_control_waypoint_index));
+  update_target_debug(pos, get_figure_eight_waypoint(rl_cfc_control_waypoint_index));
   update_next_gate_debug(rl_cfc_control_waypoint_index);
 }
 
@@ -625,12 +490,11 @@ void rl_cfc_control_init(void)
   rl_cfc_control_enabled = false;
   rl_cfc_control_waypoint_index = 0U;
   rl_cfc_control_periodic_count = 0U;
-  rl_cfc_control_actuator_scale = actuator_scale();
   for (unsigned int i = 0; i < 4U; i++) {
     rl_cfc_control_last_norm[i] = 0.f;
     rl_cfc_control_last_rpm[i] = 0.f;
-    rl_cfc_control_motor_pprz[i] = 0;
-    rl_cfc_control_applied_pprz[i] = 0;
+    rl_cfc_control_motor_rpm_cmd[i] = 0;
+    rl_cfc_control_applied_rpm_cmd[i] = 0;
     rl_cfc_control_feedback_rpm[i] = 0.f;
     rl_cfc_control_motor_state[i] = 0.f;
     rl_cfc_control_commanded_radps[i] = 0.f;
@@ -638,7 +502,9 @@ void rl_cfc_control_init(void)
     rl_cfc_control_action[i] = 0.f;
     rl_cfc_control_policy_raw_action[i] = 0.f;
   }
-  rl_cfc_control_raw_mean_pprz = 0;
+  rl_cfc_control_raw_mean_rpm = 0;
+  rl_cfc_control_mean_policy_rpm = 0.f;
+  rl_cfc_control_mean_commanded_radps = 0.f;
   reset_target_debug();
   rl_cfc_reset();
 }
@@ -650,8 +516,8 @@ void rl_cfc_control_start(void)
   for (unsigned int i = 0; i < 4U; i++) {
     rl_cfc_control_last_norm[i] = 0.f;
     rl_cfc_control_last_rpm[i] = RL_CFC_MIN_RPM;
-    rl_cfc_control_motor_pprz[i] = rl_cfc_control_output_min_pprz;
-    rl_cfc_control_applied_pprz[i] = rl_cfc_control_output_min_pprz;
+    rl_cfc_control_motor_rpm_cmd[i] = rpm_to_command(RL_CFC_MIN_RPM);
+    rl_cfc_control_applied_rpm_cmd[i] = rpm_to_command(RL_CFC_MIN_RPM);
     rl_cfc_control_feedback_rpm[i] = RL_CFC_MIN_RPM;
     rl_cfc_control_motor_state[i] = rpm_to_motor_state(RL_CFC_MIN_RPM);
     rl_cfc_control_commanded_radps[i] = RL_CFC_MIN_RADPS;
@@ -659,9 +525,12 @@ void rl_cfc_control_start(void)
     rl_cfc_control_raw_action[i] = -1.f;
     rl_cfc_control_action[i] = -1.f;
   }
-  rl_cfc_control_raw_mean_pprz = 0;
-  rl_cfc_control_waypoint_index = RL_CFC_START_WAYPOINT_INDEX % rl_num_square_waypoints;
-  update_target_debug(rl_cfc_get_position_m(), get_square_waypoint(rl_cfc_control_waypoint_index));
+  rl_cfc_control_raw_mean_rpm = 0;
+  rl_cfc_control_mean_policy_rpm = 0.f;
+  rl_cfc_control_mean_commanded_radps = 0.f;
+  const rl_vec3_t start_pos = rl_cfc_get_position_m();
+  rl_cfc_control_waypoint_index = choose_initial_waypoint(start_pos);
+  update_target_debug(start_pos, get_figure_eight_waypoint(rl_cfc_control_waypoint_index));
   update_next_gate_debug(rl_cfc_control_waypoint_index);
   rl_cfc_reset();
 }
@@ -672,8 +541,8 @@ void rl_cfc_control_stop(void)
   for (unsigned int i = 0; i < 4U; i++) {
     rl_cfc_control_last_norm[i] = 0.f;
     rl_cfc_control_last_rpm[i] = 0.f;
-    rl_cfc_control_motor_pprz[i] = 0;
-    rl_cfc_control_applied_pprz[i] = 0;
+    rl_cfc_control_motor_rpm_cmd[i] = 0;
+    rl_cfc_control_applied_rpm_cmd[i] = 0;
     rl_cfc_control_feedback_rpm[i] = 0.f;
     rl_cfc_control_motor_state[i] = 0.f;
     rl_cfc_control_commanded_radps[i] = 0.f;
@@ -681,7 +550,9 @@ void rl_cfc_control_stop(void)
     rl_cfc_control_raw_action[i] = 0.f;
     rl_cfc_control_action[i] = 0.f;
   }
-  rl_cfc_control_raw_mean_pprz = 0;
+  rl_cfc_control_raw_mean_rpm = 0;
+  rl_cfc_control_mean_policy_rpm = 0.f;
+  rl_cfc_control_mean_commanded_radps = 0.f;
   reset_target_debug();
   rl_cfc_reset();
 }
@@ -708,9 +579,11 @@ void rl_cfc_control_periodic(void)
     pos_gate = enu_to_ned_vec(pos_gate);
     vel_gate = enu_to_ned_vec(vel_gate);
   }
-  const float gate_yaw = rl_cfc_control_gate_yaw[rl_cfc_control_waypoint_index % rl_num_square_waypoints];
+  const float gate_yaw = rl_cfc_control_gate_yaw[rl_cfc_control_waypoint_index % rl_num_figure_eight_waypoints];
   pos_gate = gate_frame_vec(pos_gate, gate_yaw);
   vel_gate = gate_frame_vec(vel_gate, gate_yaw);
+  pos_gate.z *= rl_cfc_control_z_sign >= 0.f ? 1.f : -1.f;
+  vel_gate.z *= rl_cfc_control_vz_sign >= 0.f ? 1.f : -1.f;
   rl_cfc_control_input_error[0] = pos_gate.x;
   rl_cfc_control_input_error[1] = pos_gate.y;
   rl_cfc_control_input_error[2] = pos_gate.z;
@@ -722,7 +595,6 @@ void rl_cfc_control_periodic(void)
   const rl_vec3_t rates = rl_cfc_get_body_rates_radps();
   float omega[4];
   float policy_omega[4] = {0.f, 0.f, 0.f, 0.f};
-  rl_cfc_control_actuator_scale = actuator_scale();
   rl_cfc_get_motor_feedback_rpm(omega);
   for (unsigned int i = 0; i < 4U; i++) {
     rl_cfc_control_feedback_rpm[i] = omega[i];
@@ -757,6 +629,8 @@ void rl_cfc_control_periodic(void)
   float action[NUM_CONTROLS];
   rl_cfc_control(obs, action);
 
+  float rpm_sum = 0.f;
+  float radps_sum = 0.f;
   for (unsigned int i = 0; i < 4U; i++) {
     rl_cfc_control_policy_raw_action[i] = action[i];
     rl_cfc_control_raw_action[i] = action[i];
@@ -765,32 +639,27 @@ void rl_cfc_control_periodic(void)
     const float commanded_radps = train_command_u_to_radps(command_u);
     rl_cfc_control_commanded_radps[i] = commanded_radps;
     rl_cfc_control_last_norm[i] = (commanded_radps - RL_CFC_MIN_RADPS) / (RL_CFC_MAX_RADPS - RL_CFC_MIN_RADPS);
-    rl_cfc_control_last_rpm[i] = train_radps_to_bebop_rpm(commanded_radps);
+    rl_cfc_control_last_rpm[i] = train_radps_to_rpm(commanded_radps);
+    rpm_sum += rl_cfc_control_last_rpm[i];
+    radps_sum += commanded_radps;
   }
+  rl_cfc_control_mean_policy_rpm = rpm_sum * 0.25f;
+  rl_cfc_control_mean_commanded_radps = radps_sum * 0.25f;
   for (unsigned int i = 0; i < 4U; i++) {
-    rl_cfc_control_motor_pprz[i] = mapped_raw_motor_pprz(i);
+    rl_cfc_control_motor_rpm_cmd[i] = rpm_to_command(scaled_mapped_motor_rpm(i));
   }
 }
 
-int32_t rl_cfc_control_get_motor_pprz(uint8_t motor_idx, int32_t autopilot_pprz)
+void rl_cfc_control_apply_motor_rpm(bool motors_on)
 {
-  if (!rl_cfc_control_enabled || motor_idx >= 4U) {
-    if (motor_idx < 4U) {
-      rl_cfc_control_applied_pprz[motor_idx] = autopilot_pprz;
-    }
-    return autopilot_pprz;
+  if (!motors_on || !rl_cfc_control_enabled) {
+    return;
   }
 
-  const int32_t command = direct_rl_motor_pprz(motor_idx);
-
-  rl_cfc_control_applied_pprz[motor_idx] = command;
-#ifdef MOTOR_MIXING_NB_MOTOR
-  if (motor_idx < MOTOR_MIXING_NB_MOTOR) {
-    motor_mixing.commands[motor_idx] = command;
+  mean_mapped_raw_motor_rpm();
+  for (uint8_t i = 0U; i < 4U; i++) {
+    const int32_t rpm = rpm_to_command(scaled_mapped_motor_rpm(i));
+    rl_cfc_control_applied_rpm_cmd[i] = rpm;
+    apply_motor_rpm(i, rpm);
   }
-#endif
-  if (actuators_pprz != NULL) {
-    actuators_pprz[motor_idx] = (int16_t)command;
-  }
-  return command;
 }

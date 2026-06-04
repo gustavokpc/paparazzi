@@ -1,0 +1,90 @@
+<!DOCTYPE module SYSTEM "module.dtd">
+<module name="nn_mlp_control" dir="nn_mlp_control" task="control">
+  <doc>
+    <description>
+      End-to-end MLP neural controller wrapper for the TU Delft Cyberzoo square waypoint test.
+      The network input order is defined in nn_parameters.h. The network output is interpreted
+      as normalized motor commands in [0,1] and converted to RPM commands. The wrapper
+      applies the same near/far RPM-delta scaling style used by the CFC wrapper. Keep
+      the periodic task running and gate motor output with nn_mlp_control_start()/
+      nn_mlp_control_stop(). On Bebop targets the motor RPM input uses the actuator
+      board's observed RPM feedback.
+    </description>
+  </doc>
+
+  <settings>
+    <dl_settings>
+      <dl_settings name="NN MLP">
+        <dl_setting var="nn_mlp_control_enabled" min="0" step="1" max="1" shortname="enabled" values="FALSE|TRUE" type="bool" module="modules/nn_mlp_control/nn_mlp_control"/>
+        <dl_setting var="nn_mlp_control_periodic_count" min="0" step="1" max="1000000" shortname="periodic" type="uint32"/>
+        <dl_setting var="nn_mlp_control_waypoint_switch_count" min="0" step="1" max="1000000" shortname="wp_sw" type="uint32"/>
+        <dl_setting var="nn_mlp_control_waypoint_index" min="0" step="1" max="3" shortname="wp_idx" type="uint32"/>
+        <dl_setting var="nn_mlp_control_error[0]" min="-20" step="0.01" max="20" shortname="err_x" type="float"/>
+        <dl_setting var="nn_mlp_control_error[1]" min="-20" step="0.01" max="20" shortname="err_y" type="float"/>
+        <dl_setting var="nn_mlp_control_error[2]" min="-10" step="0.01" max="10" shortname="err_z" type="float"/>
+        <dl_setting var="nn_mlp_control_input_error[0]" min="-20" step="0.01" max="20" shortname="in_dx" type="float"/>
+        <dl_setting var="nn_mlp_control_input_error[1]" min="-20" step="0.01" max="20" shortname="in_dy" type="float"/>
+        <dl_setting var="nn_mlp_control_input_error[2]" min="-10" step="0.01" max="10" shortname="in_dz" type="float"/>
+        <dl_setting var="nn_mlp_control_input_velocity[0]" min="-10" step="0.01" max="10" shortname="in_vx" type="float"/>
+        <dl_setting var="nn_mlp_control_input_velocity[1]" min="-10" step="0.01" max="10" shortname="in_vy" type="float"/>
+        <dl_setting var="nn_mlp_control_input_velocity[2]" min="-10" step="0.01" max="10" shortname="in_vz" type="float"/>
+        <dl_setting var="nn_mlp_control_attitude[0]" min="-2" step="0.01" max="2" shortname="phi" type="float"/>
+        <dl_setting var="nn_mlp_control_attitude[1]" min="-2" step="0.01" max="2" shortname="theta" type="float"/>
+        <dl_setting var="nn_mlp_control_attitude[2]" min="-4" step="0.01" max="4" shortname="psi" type="float"/>
+        <dl_setting var="nn_mlp_control_body_rates[0]" min="-20" step="0.01" max="20" shortname="p" type="float"/>
+        <dl_setting var="nn_mlp_control_body_rates[1]" min="-20" step="0.01" max="20" shortname="q" type="float"/>
+        <dl_setting var="nn_mlp_control_body_rates[2]" min="-20" step="0.01" max="20" shortname="r" type="float"/>
+        <dl_setting var="nn_mlp_control_dist_to_target" min="0" step="0.01" max="50" shortname="dist" type="float"/>
+        <dl_setting var="nn_mlp_control_dist_xy_to_target" min="0" step="0.01" max="50" shortname="dist_xy" type="float"/>
+        <dl_setting var="nn_mlp_control_abs_z_error" min="0" step="0.01" max="10" shortname="abs_dz" type="float"/>
+        <dl_setting var="nn_mlp_control_mean_norm" min="0" step="0.001" max="1" shortname="mean_n" type="float"/>
+        <dl_setting var="nn_mlp_control_mean_rpm_cmd" min="0" step="1" max="12000" shortname="mean_rpm" type="int32"/>
+        <dl_setting var="nn_mlp_control_motor_rpm_cmd[0]" min="0" step="1" max="12000" shortname="m0_cmd" type="int32"/>
+        <dl_setting var="nn_mlp_control_motor_rpm_cmd[1]" min="0" step="1" max="12000" shortname="m1_cmd" type="int32"/>
+        <dl_setting var="nn_mlp_control_motor_rpm_cmd[2]" min="0" step="1" max="12000" shortname="m2_cmd" type="int32"/>
+        <dl_setting var="nn_mlp_control_motor_rpm_cmd[3]" min="0" step="1" max="12000" shortname="m3_cmd" type="int32"/>
+        <dl_setting var="nn_mlp_control_last_rpm[0]" min="0" step="1" max="12000" shortname="m0_rpm" type="float"/>
+        <dl_setting var="nn_mlp_control_last_rpm[1]" min="0" step="1" max="12000" shortname="m1_rpm" type="float"/>
+        <dl_setting var="nn_mlp_control_last_rpm[2]" min="0" step="1" max="12000" shortname="m2_rpm" type="float"/>
+        <dl_setting var="nn_mlp_control_last_rpm[3]" min="0" step="1" max="12000" shortname="m3_rpm" type="float"/>
+        <dl_setting var="nn_mlp_control_last_norm[0]" min="0" step="0.001" max="1" shortname="m0_norm" type="float"/>
+        <dl_setting var="nn_mlp_control_last_norm[1]" min="0" step="0.001" max="1" shortname="m1_norm" type="float"/>
+        <dl_setting var="nn_mlp_control_last_norm[2]" min="0" step="0.001" max="1" shortname="m2_norm" type="float"/>
+        <dl_setting var="nn_mlp_control_last_norm[3]" min="0" step="0.001" max="1" shortname="m3_norm" type="float"/>
+        <dl_setting var="nn_mlp_control_net_output_raw[0]" min="0" step="0.001" max="1" shortname="raw0" type="float"/>
+        <dl_setting var="nn_mlp_control_net_output_raw[1]" min="0" step="0.001" max="1" shortname="raw1" type="float"/>
+        <dl_setting var="nn_mlp_control_net_output_raw[2]" min="0" step="0.001" max="1" shortname="raw2" type="float"/>
+        <dl_setting var="nn_mlp_control_net_output_raw[3]" min="0" step="0.001" max="1" shortname="raw3" type="float"/>
+        <dl_setting var="nn_mlp_control_net_output_norm[0]" min="0" step="0.001" max="1" shortname="out0_n" type="float"/>
+        <dl_setting var="nn_mlp_control_net_output_norm[1]" min="0" step="0.001" max="1" shortname="out1_n" type="float"/>
+        <dl_setting var="nn_mlp_control_net_output_norm[2]" min="0" step="0.001" max="1" shortname="out2_n" type="float"/>
+        <dl_setting var="nn_mlp_control_net_output_norm[3]" min="0" step="0.001" max="1" shortname="out3_n" type="float"/>
+        <dl_setting var="nn_mlp_control_net_input_normalized[2]" min="-1" step="0.001" max="2" shortname="dz_n" type="float"/>
+        <dl_setting var="nn_mlp_control_net_input_normalized[5]" min="-1" step="0.001" max="2" shortname="vz_n" type="float"/>
+        <dl_setting var="nn_mlp_control_net_input_normalized[15]" min="-1" step="0.001" max="2" shortname="om0_n" type="float"/>
+        <dl_setting var="nn_mlp_control_net_input_normalized[16]" min="-1" step="0.001" max="2" shortname="om1_n" type="float"/>
+        <dl_setting var="nn_mlp_control_net_input_normalized[17]" min="-1" step="0.001" max="2" shortname="om2_n" type="float"/>
+        <dl_setting var="nn_mlp_control_net_input_normalized[18]" min="-1" step="0.001" max="2" shortname="om3_n" type="float"/>
+        <dl_setting var="nn_mlp_control_feedback_rpm[0]" min="0" step="1" max="14000" shortname="fb0_rpm" type="float"/>
+        <dl_setting var="nn_mlp_control_feedback_rpm[1]" min="0" step="1" max="14000" shortname="fb1_rpm" type="float"/>
+        <dl_setting var="nn_mlp_control_feedback_rpm[2]" min="0" step="1" max="14000" shortname="fb2_rpm" type="float"/>
+        <dl_setting var="nn_mlp_control_feedback_rpm[3]" min="0" step="1" max="14000" shortname="fb3_rpm" type="float"/>
+      </dl_settings>
+    </dl_settings>
+  </settings>
+
+  <dep>
+    <depends>@state,@navigation,@mixing</depends>
+  </dep>
+  <header>
+    <file name="nn_mlp_control.h"/>
+  </header>
+  <init fun="nn_mlp_control_init()"/>
+  <periodic fun="nn_mlp_control_periodic()" freq="100." autorun="TRUE"/>
+
+  <makefile target="ap|nps">
+    <file name="nn_mlp_control.c"/>
+    <file name="nn_operations.c"/>
+    <file name="nn_parameters.c"/>
+  </makefile>
+</module>

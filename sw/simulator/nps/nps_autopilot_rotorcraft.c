@@ -61,6 +61,10 @@
 #include "modules/nn_cfc_control/nn_cfc_control.h"
 #endif
 
+#if defined(MODULE_NN_MLP_CONTROL_ID) && defined(NPS_NN_MLP_DIRECT_RPM)
+#include "modules/nn_mlp_control/nn_mlp_control.h"
+#endif
+
 struct NpsAutopilot nps_autopilot;
 bool nps_bypass_ahrs;
 bool nps_bypass_ins;
@@ -75,6 +79,10 @@ bool nps_bypass_ins;
 
 #ifndef NPS_NN_CFC_DIRECT_RPM
 #define NPS_NN_CFC_DIRECT_RPM FALSE
+#endif
+
+#ifndef NPS_NN_MLP_DIRECT_RPM
+#define NPS_NN_MLP_DIRECT_RPM FALSE
 #endif
 
 #if INDI_RPM_FEEDBACK
@@ -182,13 +190,20 @@ void nps_autopilot_run_step(double time)
   main_ap_periodic();
 
   /* scale final motor commands to 0-1 for feeding the fdm */
-#if defined(MODULE_NN_CFC_CONTROL_ID) && NPS_NN_CFC_DIRECT_RPM
+#if defined(MODULE_NN_MLP_CONTROL_ID) && NPS_NN_MLP_DIRECT_RPM
+  nps_autopilot.commands_are_rpm = nn_mlp_control_enabled;
+#elif defined(MODULE_NN_CFC_CONTROL_ID) && NPS_NN_CFC_DIRECT_RPM
   nps_autopilot.commands_are_rpm = nn_cfc_control_enabled;
 #else
   nps_autopilot.commands_are_rpm = false;
 #endif
   for (uint8_t i = 0; i < NPS_COMMANDS_NB; i++) {
-#if defined(MODULE_NN_CFC_CONTROL_ID) && NPS_NN_CFC_DIRECT_RPM
+#if defined(MODULE_NN_MLP_CONTROL_ID) && NPS_NN_MLP_DIRECT_RPM
+    if (nps_autopilot.commands_are_rpm) {
+      nps_autopilot.commands[i] = autopilot_get_motors_on() ? (double)nn_mlp_control_motor_rpm_cmd[i] : 0.0;
+      continue;
+    }
+#elif defined(MODULE_NN_CFC_CONTROL_ID) && NPS_NN_CFC_DIRECT_RPM
     if (nps_autopilot.commands_are_rpm) {
       nps_autopilot.commands[i] = autopilot_get_motors_on() ? (double)nn_cfc_control_motor_rpm_cmd[i] : 0.0;
       continue;

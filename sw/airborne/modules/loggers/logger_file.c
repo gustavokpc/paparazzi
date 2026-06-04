@@ -93,10 +93,8 @@ static void logger_file_write_header(FILE *file) {
   for (unsigned int i = 0; i < 19U; i++) {
     fprintf(file, "nn_in_%s_normalized,", nn_cfc_input_names[i]);
   }
-  fprintf(file, "motor1_cmd_pprz,motor2_cmd_pprz,motor3_cmd_pprz,motor4_cmd_pprz,");
   fprintf(file, "network_out1_norm,network_out2_norm,network_out3_norm,network_out4_norm,");
   fprintf(file, "rpm_cmd1,rpm_cmd2,rpm_cmd3,rpm_cmd4,");
-  fprintf(file, "hover_rpm_training,hover_rpm_gazebo,rpm_delta_scale,");
 #endif
 #ifdef COMMAND_THRUST
   fprintf(file, "cmd_thrust,cmd_roll,cmd_pitch,cmd_yaw\n");
@@ -136,11 +134,6 @@ static void logger_file_write_row(FILE *file) {
   for (unsigned int i = 0; i < 19U; i++) {
     fprintf(file, "%f,", nn_cfc_control_net_input_normalized[i]);
   }
-  fprintf(file, "%d,%d,%d,%d,",
-      nn_cfc_control_motor_pprz_cmd[0],
-      nn_cfc_control_motor_pprz_cmd[1],
-      nn_cfc_control_motor_pprz_cmd[2],
-      nn_cfc_control_motor_pprz_cmd[3]);
   fprintf(file, "%f,%f,%f,%f,",
       nn_cfc_control_net_output_norm[0],
       nn_cfc_control_net_output_norm[1],
@@ -151,10 +144,6 @@ static void logger_file_write_row(FILE *file) {
       nn_cfc_control_motor_rpm_cmd[1],
       nn_cfc_control_motor_rpm_cmd[2],
       nn_cfc_control_motor_rpm_cmd[3]);
-  fprintf(file, "%f,%f,%f,",
-      nn_cfc_control_hover_rpm_training,
-      nn_cfc_control_hover_rpm_gazebo,
-      nn_cfc_control_rpm_delta_scale);
 #endif
 #ifdef COMMAND_THRUST
   fprintf(file, "%d,%d,%d,%d\n",

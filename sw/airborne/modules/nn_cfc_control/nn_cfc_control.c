@@ -25,7 +25,6 @@
 #include "generated/airframe.h"
 #include "generated/flight_plan.h"
 #include "generated/modules.h"
-#include "modules/actuators/motor_mixing.h"
 #include "modules/nav/waypoints.h"
 
 #ifdef MODULE_LOGGER_FILE_ID
@@ -34,6 +33,10 @@
 
 #ifdef BOARD_BEBOP
 #include "boards/bebop/actuators.h"
+#endif
+
+#if defined(USE_NPS) && USE_NPS
+#include "nps_fdm.h"
 #endif
 
 #include <math.h>
@@ -51,11 +54,11 @@
  * debug/telemetry variables so there is a single source of truth.
  */
 #ifndef NN_CFC_REACHED_RADIUS_M
-#define NN_CFC_REACHED_RADIUS_M 0.25f
+#define NN_CFC_REACHED_RADIUS_M 0.1f
 #endif
 
 #ifndef NN_CFC_TARGET_ALT_M
-#define NN_CFC_TARGET_ALT_M 1.0f
+#define NN_CFC_TARGET_ALT_M 1.5f
 #endif
 
 #ifndef NN_CFC_START_WAYPOINT_INDEX
@@ -69,39 +72,6 @@
 
 #ifndef NN_CFC_MAX_RPM
 #define NN_CFC_MAX_RPM 10000.0f
-#endif
-
-#ifndef NN_CFC_HOVER_RPM_TRAINING
-#define NN_CFC_HOVER_RPM_TRAINING 7497.0f
-#endif
-
-#ifndef NN_CFC_HOVER_RPM_GAZEBO
-#define NN_CFC_HOVER_RPM_GAZEBO 6500.0f
-#endif
-
-#ifndef NN_CFC_RPM_DELTA_SCALE_FAR
-#define NN_CFC_RPM_DELTA_SCALE_FAR 1.20f
-#endif
-
-#ifndef NN_CFC_RPM_DELTA_SCALE_NEAR
-#define NN_CFC_RPM_DELTA_SCALE_NEAR 0.65f
-#endif
-
-#ifndef NN_CFC_SCALE_DIST_NEAR_M
-#define NN_CFC_SCALE_DIST_NEAR_M 0.25f
-#endif
-
-#ifndef NN_CFC_SCALE_DIST_FAR_M
-#define NN_CFC_SCALE_DIST_FAR_M 1.00f
-#endif
-
-/* PPRZ/NPS conversion range used when the NN RPM command is sent through motor_mixing. */
-#ifndef NN_CFC_NPS_MIN_RPM
-#define NN_CFC_NPS_MIN_RPM 0.0f
-#endif
-
-#ifndef NN_CFC_NPS_MAX_RPM
-#define NN_CFC_NPS_MAX_RPM NN_CFC_MAX_RPM
 #endif
 
 typedef struct {
@@ -121,7 +91,6 @@ unsigned int nn_cfc_control_waypoint_index = 0;
 float nn_cfc_control_last_norm[4] = {0.f, 0.f, 0.f, 0.f};
 float nn_cfc_control_last_rpm[4] = {0.f, 0.f, 0.f, 0.f};
 int32_t nn_cfc_control_motor_rpm_cmd[4] = {0, 0, 0, 0};
-int32_t nn_cfc_control_motor_pprz_cmd[4] = {0, 0, 0, 0};
 int32_t nn_cfc_control_applied_rpm_cmd[4] = {0, 0, 0, 0};
 int32_t nn_cfc_control_raw_mean_rpm = 0;
 unsigned int nn_cfc_control_periodic_count = 0U;
@@ -136,9 +105,6 @@ float nn_cfc_control_external_moment_nm[3] = {0.f, 0.f, 0.f};
 float nn_cfc_control_feedback_rpm[4] = {0.f, 0.f, 0.f, 0.f};
 float nn_cfc_control_attitude[3] = {0.f, 0.f, 0.f};
 float nn_cfc_control_body_rates[3] = {0.f, 0.f, 0.f};
-float nn_cfc_control_hover_rpm_training = NN_CFC_HOVER_RPM_TRAINING;
-float nn_cfc_control_hover_rpm_gazebo = NN_CFC_HOVER_RPM_GAZEBO;
-float nn_cfc_control_rpm_delta_scale = NN_CFC_RPM_DELTA_SCALE_FAR;
 float nn_cfc_control_dist_to_target = 0.f;
 float nn_cfc_control_dist_xy_to_target = 0.f;
 float nn_cfc_control_abs_z_error = 0.f;
@@ -229,11 +195,24 @@ __attribute__((weak)) void nn_cfc_get_motor_feedback_rpm(float omega_rpm[4])
     omega_rpm[i] = (float)actuators_bebop.rpm_obs[nn_cfc_net_to_phys_motor[i]];
   }
 #else
-  /* NPS has no measured rotor speed here, so reuse the previously commanded RPM. */
-  omega_rpm[0] = nn_cfc_control_last_rpm[0];
-  omega_rpm[1] = nn_cfc_control_last_rpm[1];
-  omega_rpm[2] = nn_cfc_control_last_rpm[2];
-  omega_rpm[3] = nn_cfc_control_last_rpm[3];
+  /*
+   * In NPS/Gazebo, nps_fdm_gazebo exposes the actuator state in fdm.rpm[].
+   * Fall back to the previous command until the FDM has produced valid RPMs.
+   */
+#if defined(USE_NPS) && USE_NPS
+  if (fdm.num_engines >= 4U) {
+    for (uint8_t i = 0U; i < 4U; i++) {
+      const uint8_t phys_idx = nn_cfc_net_to_phys_motor[i];
+      omega_rpm[i] = fdm.rpm[phys_idx] > 0.f ? fdm.rpm[phys_idx] : nn_cfc_control_last_rpm[i];
+    }
+  } else
+#endif
+  {
+    omega_rpm[0] = nn_cfc_control_last_rpm[0];
+    omega_rpm[1] = nn_cfc_control_last_rpm[1];
+    omega_rpm[2] = nn_cfc_control_last_rpm[2];
+    omega_rpm[3] = nn_cfc_control_last_rpm[3];
+  }
 #endif
 }
 
@@ -325,51 +304,6 @@ static int32_t rpm_to_command(float rpm)
   return (int32_t)clampf(rpm, NN_CFC_MIN_RPM, NN_CFC_MAX_RPM);
 }
 
-static float compute_distance_based_rpm_scale(float dist_m)
-{
-  /*
-   * Far from the waypoint, preserve/aggressively scale NN RPM deltas. Near the
-   * waypoint, soften those deltas to reduce hover oscillations.
-   */
-  if (dist_m <= NN_CFC_SCALE_DIST_NEAR_M) {
-    return NN_CFC_RPM_DELTA_SCALE_NEAR;
-  }
-
-  if (dist_m >= NN_CFC_SCALE_DIST_FAR_M) {
-    return NN_CFC_RPM_DELTA_SCALE_FAR;
-  }
-
-  const float alpha =
-      (dist_m - NN_CFC_SCALE_DIST_NEAR_M) /
-      (NN_CFC_SCALE_DIST_FAR_M - NN_CFC_SCALE_DIST_NEAR_M);
-
-  return NN_CFC_RPM_DELTA_SCALE_NEAR +
-         alpha * (NN_CFC_RPM_DELTA_SCALE_FAR - NN_CFC_RPM_DELTA_SCALE_NEAR);
-}
-
-static float calibrate_rpm_command(float trained_rpm, float rpm_delta_scale)
-{
-  /*
-   * The network was trained around one hover RPM, while Gazebo may hover around
-   * another. Shift the hover point, then scale only the delta around hover.
-   */
-  const float rpm =
-      nn_cfc_control_hover_rpm_gazebo +
-      rpm_delta_scale *
-          (trained_rpm - nn_cfc_control_hover_rpm_training);
-
-  return clampf(rpm, NN_CFC_MIN_RPM, NN_CFC_MAX_RPM);
-}
-
-static int32_t rpm_to_nps_command(float rpm)
-{
-  /* Convert calibrated RPM into the 0..MAX_PPRZ command consumed by NPS/Gazebo. */
-  const float nps_min = NN_CFC_NPS_MIN_RPM;
-  const float nps_max = NN_CFC_NPS_MAX_RPM > nps_min ? NN_CFC_NPS_MAX_RPM : NN_CFC_MAX_RPM;
-  const float norm = (clampf(rpm, nps_min, nps_max) - nps_min) / (nps_max - nps_min);
-  return TRIM_PPRZ((int32_t)(norm * (float)MAX_PPRZ + 0.5f));
-}
-
 static void update_motor_command_debug(void)
 {
   /* Mean of calibrated NN RPMs, useful as a quick hover/throttle sanity check. */
@@ -384,12 +318,11 @@ static void apply_motor_rpm(uint8_t motor_idx, int32_t rpm)
 {
 #ifndef BOARD_BEBOP
   /*
-   * Simulation path: write PPRZ motor_mixing commands so Gazebo uses the
-   * regular Paparazzi actuator interface.
+   * NPS/Gazebo reads nn_cfc_control_motor_rpm_cmd[] directly when
+   * NPS_NN_CFC_DIRECT_RPM is enabled in the nps airframe target.
    */
-  if (motor_idx < MOTOR_MIXING_NB_MOTOR) {
-    motor_mixing.commands[motor_idx] = rpm_to_nps_command((float)rpm);
-  }
+  (void)motor_idx;
+  (void)rpm;
 #else
   /* Real Bebop path: the actuator driver accepts RPM-like motor references. */
   actuators_bebop_set(motor_idx, (int16_t)rpm);
@@ -454,7 +387,7 @@ static void maybe_advance_waypoint(const nn_vec3_t pos)
   if (d2 < reached_radius * reached_radius) {
     nn_cfc_control_waypoint_index = (nn_cfc_control_waypoint_index + 1U) % nn_num_square_waypoints;
     nn_cfc_control_waypoint_switch_count++;
-    nn_cfc_reset();
+    // nn_cfc_reset(); // dont know
   }
   update_target_debug(pos, get_square_waypoint(nn_cfc_control_waypoint_index));
 }
@@ -470,7 +403,6 @@ void nn_cfc_control_init(void)
     nn_cfc_control_last_norm[i] = 0.f;
     nn_cfc_control_last_rpm[i] = 0.f;
     nn_cfc_control_motor_rpm_cmd[i] = 0;
-    nn_cfc_control_motor_pprz_cmd[i] = 0;
     nn_cfc_control_applied_rpm_cmd[i] = 0;
     nn_cfc_control_feedback_rpm[i] = 0.f;
     nn_cfc_control_net_output_norm[i] = 0.f;
@@ -511,7 +443,6 @@ void nn_cfc_control_start(void)
     nn_cfc_control_last_norm[i] = 0.f;
     nn_cfc_control_last_rpm[i] = NN_CFC_MIN_RPM;
     nn_cfc_control_motor_rpm_cmd[i] = 0;
-    nn_cfc_control_motor_pprz_cmd[i] = 0;
     nn_cfc_control_applied_rpm_cmd[i] = 0;
     nn_cfc_control_feedback_rpm[i] = NN_CFC_MIN_RPM;
   }
@@ -532,7 +463,6 @@ void nn_cfc_control_stop(void)
     nn_cfc_control_last_norm[i] = 0.f;
     nn_cfc_control_last_rpm[i] = 0.f;
     nn_cfc_control_motor_rpm_cmd[i] = 0;
-    nn_cfc_control_motor_pprz_cmd[i] = 0;
     nn_cfc_control_applied_rpm_cmd[i] = 0;
     nn_cfc_control_feedback_rpm[i] = 0.f;
   }
@@ -606,7 +536,7 @@ void nn_cfc_control_periodic(void)
     mext.x, mext.y, mext.z,
     omega[0], omega[1], omega[2], omega[3]
   };
-  clamp_state_to_training_range(state);
+  // clamp_state_to_training_range(state);  Disable to test rob
 
   /* 4. Save raw/normalized inputs before inference for logger_file and telemetry. */
   for (unsigned int i = 0; i < NUM_STATES; i++) {
@@ -618,13 +548,7 @@ void nn_cfc_control_periodic(void)
   float normalized_cmd[NUM_CONTROLS];
   nn_cfc_control(state, normalized_cmd);
 
-  /*
-   * 6. Convert normalized outputs to trained RPM, shift them to the Gazebo hover
-   *    point, and soften/aggressively scale deltas based on waypoint distance.
-   */
-  const float rpm_delta_scale = compute_distance_based_rpm_scale(nn_cfc_control_dist_to_target);
-
-  nn_cfc_control_rpm_delta_scale = rpm_delta_scale;
+  /* 6. Convert normalized outputs directly to the trained RPM command range. */
   for (unsigned int i = 0; i < 4U; i++) {
     nn_cfc_control_last_norm[i] = clampf(normalized_cmd[i], 0.f, 1.f);  // already clamped
     nn_cfc_control_net_output_norm[i] = normalized_cmd[i];
@@ -632,7 +556,7 @@ void nn_cfc_control_periodic(void)
     const float trained_rpm =
         NN_CFC_MIN_RPM +
         nn_cfc_control_last_norm[i] * (NN_CFC_MAX_RPM - NN_CFC_MIN_RPM);
-    nn_cfc_control_last_rpm[i] = calibrate_rpm_command(trained_rpm, rpm_delta_scale);
+    nn_cfc_control_last_rpm[i] = trained_rpm;
     nn_cfc_control_motor_rpm_cmd[nn_cfc_net_to_phys_motor[i]] = rpm_to_command(nn_cfc_control_last_rpm[i]);
   }
 
@@ -653,7 +577,8 @@ void nn_cfc_control_apply_motor_rpm(bool motors_on)
   /*
    * The normal command_laws run first and keep takeoff/landing fallback alive.
    * When neural control is enabled, overwrite each motor with the NN-derived
-   * reference. In NPS this is written as PPRZ; on Bebop it is sent as RPM.
+   * reference. In NPS the simulator reads the RPM command array directly; on
+   * Bebop it is sent to the actuator driver as RPM.
    */
   if (!motors_on || !nn_cfc_control_enabled) {
     return;
@@ -664,7 +589,6 @@ void nn_cfc_control_apply_motor_rpm(bool motors_on)
     const uint8_t phys_idx = nn_cfc_net_to_phys_motor[i];
     const int32_t rpm = rpm_to_command(nn_cfc_control_last_rpm[i]);
     nn_cfc_control_applied_rpm_cmd[phys_idx] = rpm;
-    nn_cfc_control_motor_pprz_cmd[phys_idx] = rpm_to_nps_command((float)rpm);
     apply_motor_rpm(phys_idx, rpm);
   }
 }

@@ -2,12 +2,23 @@
   <aircraft
    name="bebop_orange_avoid"
    ac_id="42"
-   airframe="airframes/tudelft/bebop_nn_cfc_control.xml"
+   airframe="airframes/tudelft/bebop_nn_mlp_control.xml"
    radio="radios/dummy.xml"
    telemetry="telemetry/default_rotorcraft.xml"
-   flight_plan="flight_plans/tudelft/nn_waypoints_square.xml"
+   flight_plan="flight_plans/tudelft/nn_mlp_waypoints_square.xml"
    settings="settings/rotorcraft_basic.xml"
-   settings_modules="modules/ahrs_float_mlkf.xml modules/ahrs_int_cmpl_quat.xml modules/bebop_cam.xml modules/electrical.xml modules/gps.xml modules/guidance_pid_rotorcraft.xml modules/guidance_rotorcraft.xml modules/imu_common.xml modules/ins_extended.xml modules/nav_rotorcraft.xml modules/nn_cfc_control.xml modules/stabilization_indi_simple.xml modules/video_capture.xml modules/video_rtp_stream.xml"
+   settings_modules="modules/ahrs_float_mlkf.xml modules/ahrs_int_cmpl_quat.xml modules/bebop_cam.xml modules/electrical.xml modules/gps.xml modules/guidance_pid_rotorcraft.xml modules/guidance_rotorcraft.xml modules/imu_common.xml modules/ins_extended.xml modules/nav_rotorcraft.xml modules/nn_mlp_control.xml modules/stabilization_indi_simple.xml modules/video_capture.xml modules/video_rtp_stream.xml"
+   gui_color="white"
+  />
+  <aircraft
+   name="bebop_nn_mlp"
+   ac_id="44"
+   airframe="airframes/tudelft/bebop_nn_mlp_control.xml"
+   radio="radios/dummy.xml"
+   telemetry="telemetry/default_rotorcraft.xml"
+   flight_plan="flight_plans/tudelft/nn_mlp_waypoints_square.xml"
+   settings="settings/rotorcraft_basic.xml"
+   settings_modules="modules/ahrs_float_mlkf.xml modules/ahrs_int_cmpl_quat.xml modules/bebop_cam.xml modules/electrical.xml modules/gps.xml modules/guidance_pid_rotorcraft.xml modules/guidance_rotorcraft.xml modules/imu_common.xml modules/ins_extended.xml modules/nav_rotorcraft.xml modules/nn_mlp_control.xml modules/stabilization_indi_simple.xml modules/video_capture.xml modules/video_rtp_stream.xml"
    gui_color="white"
   />
   <aircraft

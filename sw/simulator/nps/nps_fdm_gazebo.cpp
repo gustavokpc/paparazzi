@@ -81,7 +81,7 @@ using namespace std;
 #endif
 
 #ifndef NPS_ACTUATOR_MAX_RPM
-#define NPS_ACTUATOR_MAX_RPM 10000.0
+#define NPS_ACTUATOR_MAX_RPM 11065.0
 #endif
 
 #ifndef NPS_ACTUATOR_RPM_THRUST_EXPONENT
@@ -636,8 +636,7 @@ static void gazebo_read(void)
   fdm.left_aileron = 0;
   fdm.right_aileron = 0;
   fdm.rudder = 0;
-  /* engine: unused */
-  fdm.num_engines = 0;
+  fdm.num_engines = NPS_COMMANDS_NB < FG_NET_FDM_MAX_ENGINES ? NPS_COMMANDS_NB : FG_NET_FDM_MAX_ENGINES;
 }
 
 /**
@@ -680,6 +679,13 @@ static void gazebo_write(double act_commands[], int commands_nb)
 #else
     double u = sp;
 #endif
+    if (command_is_rpm) {
+      fdm.num_engines = commands_nb < FG_NET_FDM_MAX_ENGINES ? commands_nb : FG_NET_FDM_MAX_ENGINES;
+      if (i < FG_NET_FDM_MAX_ENGINES) {
+        fdm.eng_state[i] = autopilot.motors_on ? 1 : 0;
+        fdm.rpm[i] = (float)(u * NPS_ACTUATOR_MAX_RPM);
+      }
+    }
     if (command_is_rpm) {
       u = pow(u, NPS_ACTUATOR_RPM_THRUST_EXPONENT);
     }

@@ -31,12 +31,17 @@
 #include "modules/loggers/logger_file.h"
 #endif
 
-#ifdef BOARD_BEBOP
+/*
+ * Paparazzi's bebop2 board reuses the bebop board support package:
+ * conf/boards/bebop2.makefile sets BOARD=bebop and adds BEBOP_VERSION2.
+ * So BOARD_BEBOP covers both Bebop and Bebop2 actuator/RPM feedback paths.
+ */
+#if defined(BOARD_BEBOP)
+#define NN_CFC_HAS_BEBOP_ACTUATORS 1
 #include "boards/bebop/actuators.h"
-#endif
-
-#if defined(USE_NPS) && USE_NPS
-#include "nps_fdm.h"
+#else
+#define NN_CFC_HAS_BEBOP_ACTUATORS 0
+#include "modules/actuators/motor_mixing.h"
 #endif
 
 #include <math.h>
@@ -54,7 +59,7 @@
  * debug/telemetry variables so there is a single source of truth.
  */
 #ifndef NN_CFC_REACHED_RADIUS_M
-#define NN_CFC_REACHED_RADIUS_M 0.1f
+#define NN_CFC_REACHED_RADIUS_M 0.001f
 #endif
 
 #ifndef NN_CFC_TARGET_ALT_M
@@ -72,6 +77,30 @@
 
 #ifndef NN_CFC_MAX_RPM
 #define NN_CFC_MAX_RPM 10000.0f
+#endif
+
+#ifndef NN_CFC_REVERSE_YAW_OUTPUT
+#define NN_CFC_REVERSE_YAW_OUTPUT FALSE
+#endif
+
+/*
+ * NPS/Gazebo conversion used only when this module is compiled without the
+ * Bebop actuator driver. Real Bebop/Bebop2 builds keep sending RPM directly.
+ */
+#ifndef NN_CFC_TRAIN_CT0
+#define NN_CFC_TRAIN_CT0 1.5608699335679425e-02f
+#endif
+
+#ifndef NN_CFC_TRAIN_RHO
+#define NN_CFC_TRAIN_RHO 1.225f
+#endif
+
+#ifndef NN_CFC_TRAIN_PROP_RADIUS_M
+#define NN_CFC_TRAIN_PROP_RADIUS_M 0.075f
+#endif
+
+#ifndef NN_CFC_NPS_DEFAULT_MAX_THRUST_N
+#define NN_CFC_NPS_DEFAULT_MAX_THRUST_N 2.80f
 #endif
 
 typedef struct {
@@ -189,30 +218,16 @@ __attribute__((weak)) nn_vec3_t nn_cfc_get_external_moment_nm(void)
 
 __attribute__((weak)) void nn_cfc_get_motor_feedback_rpm(float omega_rpm[4])
 {
-#ifdef BOARD_BEBOP
-  /* Real Bebop builds can feed measured motor RPM back into the network state. */
+#if NN_CFC_HAS_BEBOP_ACTUATORS
+  /* Real Bebop/Bebop2 builds can feed measured motor RPM back into the network state. */
   for (uint8_t i = 0U; i < 4U; i++) {
     omega_rpm[i] = (float)actuators_bebop.rpm_obs[nn_cfc_net_to_phys_motor[i]];
   }
 #else
-  /*
-   * In NPS/Gazebo, nps_fdm_gazebo exposes the actuator state in fdm.rpm[].
-   * Fall back to the previous command until the FDM has produced valid RPMs.
-   */
-#if defined(USE_NPS) && USE_NPS
-  if (fdm.num_engines >= 4U) {
-    for (uint8_t i = 0U; i < 4U; i++) {
-      const uint8_t phys_idx = nn_cfc_net_to_phys_motor[i];
-      omega_rpm[i] = fdm.rpm[phys_idx] > 0.f ? fdm.rpm[phys_idx] : nn_cfc_control_last_rpm[i];
-    }
-  } else
-#endif
-  {
-    omega_rpm[0] = nn_cfc_control_last_rpm[0];
-    omega_rpm[1] = nn_cfc_control_last_rpm[1];
-    omega_rpm[2] = nn_cfc_control_last_rpm[2];
-    omega_rpm[3] = nn_cfc_control_last_rpm[3];
-  }
+  omega_rpm[0] = nn_cfc_control_last_rpm[0];
+  omega_rpm[1] = nn_cfc_control_last_rpm[1];
+  omega_rpm[2] = nn_cfc_control_last_rpm[2];
+  omega_rpm[3] = nn_cfc_control_last_rpm[3];
 #endif
 }
 
@@ -304,6 +319,33 @@ static int32_t rpm_to_command(float rpm)
   return (int32_t)clampf(rpm, NN_CFC_MIN_RPM, NN_CFC_MAX_RPM);
 }
 
+static void apply_yaw_output_convention(float motor_norm[4])
+{
+#if NN_CFC_REVERSE_YAW_OUTPUT
+  /*
+   * Bebop2 uses MOTOR_MIXING_REVERSE=TRUE in the normal mixer, but this module
+   * bypasses the mixer and writes RPM directly. Flip only the yaw component of
+   * the network's QUAD_X motor vector, preserving thrust/roll/pitch.
+   */
+  const float fl = motor_norm[0];
+  const float fr = motor_norm[1];
+  const float br = motor_norm[2];
+  const float bl = motor_norm[3];
+
+  const float thrust = 0.25f * (fl + fr + br + bl);
+  const float roll = 0.25f * (fl - fr - br + bl);
+  const float pitch = 0.25f * (fl + fr - br - bl);
+  const float yaw = 0.25f * (-fl + fr - br + bl);
+
+  motor_norm[0] = clampf(thrust + roll + pitch + yaw, 0.f, 1.f);
+  motor_norm[1] = clampf(thrust - roll + pitch - yaw, 0.f, 1.f);
+  motor_norm[2] = clampf(thrust - roll - pitch + yaw, 0.f, 1.f);
+  motor_norm[3] = clampf(thrust + roll - pitch - yaw, 0.f, 1.f);
+#else
+  (void)motor_norm;
+#endif
+}
+
 static void update_motor_command_debug(void)
 {
   /* Mean of calibrated NN RPMs, useful as a quick hover/throttle sanity check. */
@@ -314,17 +356,54 @@ static void update_motor_command_debug(void)
   nn_cfc_control_raw_mean_rpm = sum / 4;
 }
 
+#if !NN_CFC_HAS_BEBOP_ACTUATORS
+static float nps_actuator_max_thrust_n(uint8_t motor_idx)
+{
+#ifdef NPS_ACTUATOR_THRUSTS
+  const float nps_actuator_thrusts[] = NPS_ACTUATOR_THRUSTS;
+  const uint8_t thrusts_nb = sizeof(nps_actuator_thrusts) / sizeof(nps_actuator_thrusts[0]);
+  if (motor_idx < thrusts_nb && nps_actuator_thrusts[motor_idx] > 0.f) {
+    return nps_actuator_thrusts[motor_idx];
+  }
+#else
+  (void)motor_idx;
+#endif
+  return NN_CFC_NPS_DEFAULT_MAX_THRUST_N;
+}
+
+static int32_t rpm_to_nps_pprz_command(uint8_t motor_idx, float rpm)
+{
+  /*
+   * RPM -> PPRZ conversion for NPS/Gazebo only.
+   *
+   * The NN output is trained as an absolute RPM reference:
+   *   normalized 0 -> NN_CFC_MIN_RPM, normalized 1 -> NN_CFC_MAX_RPM.
+   * Gazebo's FDM expects a normalized thrust command:
+   *   thrust = NPS_ACTUATOR_THRUSTS[motor] * (PPRZ / MAX_PPRZ).
+   *
+   * Use the same hover/low-advance thrust approximation as the training model:
+   *   thrust = Ct0 * rho * omega^2 * R^2 * area.
+   */
+  rpm = clampf(rpm, NN_CFC_MIN_RPM, NN_CFC_MAX_RPM);
+  const float pi = 3.14159265358979323846f;
+  const float omega = rpm * (2.f * pi / 60.f);
+  const float radius = NN_CFC_TRAIN_PROP_RADIUS_M;
+  const float area = pi * radius * radius;
+  const float thrust_n = NN_CFC_TRAIN_CT0 * NN_CFC_TRAIN_RHO *
+                         omega * omega * radius * radius * area;
+  const float max_thrust_n = nps_actuator_max_thrust_n(motor_idx);
+  const float normalized_thrust = thrust_n / max_thrust_n;
+  const float pprz = clampf(normalized_thrust, 0.f, 1.f) * (float)MAX_PPRZ;
+  return (int32_t)(pprz + 0.5f);
+}
+#endif
+
 static void apply_motor_rpm(uint8_t motor_idx, int32_t rpm)
 {
-#ifndef BOARD_BEBOP
-  /*
-   * NPS/Gazebo reads nn_cfc_control_motor_rpm_cmd[] directly when
-   * NPS_NN_CFC_DIRECT_RPM is enabled in the nps airframe target.
-   */
-  (void)motor_idx;
-  (void)rpm;
+#if !NN_CFC_HAS_BEBOP_ACTUATORS
+  motor_mixing.commands[motor_idx] = rpm_to_nps_pprz_command(motor_idx, (float)rpm);
 #else
-  /* Real Bebop path: the actuator driver accepts RPM-like motor references. */
+  /* Real Bebop/Bebop2 path: the actuator driver accepts RPM-like motor references. */
   actuators_bebop_set(motor_idx, (int16_t)rpm);
 #endif
 }
@@ -547,6 +626,7 @@ void nn_cfc_control_periodic(void)
   /* 5. Run the exported CFC network. Output is normalized motor command [0,1]. */
   float normalized_cmd[NUM_CONTROLS];
   nn_cfc_control(state, normalized_cmd);
+  apply_yaw_output_convention(normalized_cmd);
 
   /* 6. Convert normalized outputs directly to the trained RPM command range. */
   for (unsigned int i = 0; i < 4U; i++) {
@@ -576,9 +656,9 @@ void nn_cfc_control_apply_motor_rpm(bool motors_on)
 {
   /*
    * The normal command_laws run first and keep takeoff/landing fallback alive.
-   * When neural control is enabled, overwrite each motor with the NN-derived
-   * reference. In NPS the simulator reads the RPM command array directly; on
-   * Bebop it is sent to the actuator driver as RPM.
+   * When neural control is enabled, overwrite each motor with the NN-derived:
+   * - RPM reference on real Bebop/Bebop2 builds;
+   * - PPRZ thrust-equivalent command on NPS/Gazebo builds.
    */
   if (!motors_on || !nn_cfc_control_enabled) {
     return;

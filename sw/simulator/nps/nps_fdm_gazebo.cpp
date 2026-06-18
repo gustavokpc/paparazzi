@@ -28,7 +28,6 @@
 
 #include <cstdio>
 #include <cstdlib>
-#include <cmath>
 #include <string>
 #include <iostream>
 #include <sys/time.h>
@@ -78,14 +77,6 @@ using namespace std;
 #endif
 #ifndef NPS_GAZEBO_AC_NAME
 #define NPS_GAZEBO_AC_NAME "ardrone"
-#endif
-
-#ifndef NPS_ACTUATOR_MAX_RPM
-#define NPS_ACTUATOR_MAX_RPM 11065.0
-#endif
-
-#ifndef NPS_ACTUATOR_RPM_THRUST_EXPONENT
-#define NPS_ACTUATOR_RPM_THRUST_EXPONENT 1.0
 #endif
 
 // Add video handling functions if req'd.
@@ -636,7 +627,8 @@ static void gazebo_read(void)
   fdm.left_aileron = 0;
   fdm.right_aileron = 0;
   fdm.rudder = 0;
-  fdm.num_engines = NPS_COMMANDS_NB < FG_NET_FDM_MAX_ENGINES ? NPS_COMMANDS_NB : FG_NET_FDM_MAX_ENGINES;
+  /* engine: unused */
+  fdm.num_engines = 0;
 }
 
 /**
@@ -660,17 +652,7 @@ static void gazebo_write(double act_commands[], int commands_nb)
 {
   for (int i = 0; i < commands_nb; ++i) {
     // Thrust setpoint
-    double sp = autopilot.motors_on ? act_commands[i] : 0.0;
-    const bool command_is_rpm = nps_autopilot.commands_are_rpm;
-    if (command_is_rpm) {
-      double rpm_norm = sp / NPS_ACTUATOR_MAX_RPM;
-      if (rpm_norm < 0.0) {
-        rpm_norm = 0.0;
-      } else if (rpm_norm > 1.0) {
-        rpm_norm = 1.0;
-      }
-      sp = rpm_norm;
-    }
+    double sp = autopilot.motors_on ? act_commands[i] : 0.0;  // Normalized thrust setpoint
 
     // Actuator dynamics, forces and torques
 #ifdef NPS_ACTUATOR_TIME_CONSTANTS
@@ -679,16 +661,6 @@ static void gazebo_write(double act_commands[], int commands_nb)
 #else
     double u = sp;
 #endif
-    if (command_is_rpm) {
-      fdm.num_engines = commands_nb < FG_NET_FDM_MAX_ENGINES ? commands_nb : FG_NET_FDM_MAX_ENGINES;
-      if (i < FG_NET_FDM_MAX_ENGINES) {
-        fdm.eng_state[i] = autopilot.motors_on ? 1 : 0;
-        fdm.rpm[i] = (float)(u * NPS_ACTUATOR_MAX_RPM);
-      }
-    }
-    if (command_is_rpm) {
-      u = pow(u, NPS_ACTUATOR_RPM_THRUST_EXPONENT);
-    }
     double thrust = gazebo_actuators.thrusts[i] * u;
     double torque = gazebo_actuators.torques[i] * u;
 

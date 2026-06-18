@@ -9,11 +9,11 @@
       </velocity_decay>
       
       <inertial>
-        <mass>0.536</mass>
+        <mass>0.467</mass> // default was 0.536 (put 0.467 to add with 0.043 and result 0.510 beacause mass of rotors and cameras)
         <inertia>
-          <ixx> 0.000906 </ixx>
-          <iyy> 0.002225 </iyy>
-          <izz> 0.002500 </izz>
+          <ixx> 0.001920 </ixx> // default was 0.000906
+          <iyy> 0.001850 </iyy> // default was 0.002225
+          <izz> 0.003340 </izz> // default was 0.002500
           <ixy> 0. </ixy>
           <ixz> 0. </ixz>
           <iyz> 0. </iyz>

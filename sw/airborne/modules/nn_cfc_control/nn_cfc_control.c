@@ -59,7 +59,7 @@
  * debug/telemetry variables so there is a single source of truth.
  */
 #ifndef NN_CFC_REACHED_RADIUS_M
-#define NN_CFC_REACHED_RADIUS_M 0.001f
+#define NN_CFC_REACHED_RADIUS_M 0.15f
 #endif
 
 #ifndef NN_CFC_TARGET_ALT_M

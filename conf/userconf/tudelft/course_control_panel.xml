@@ -8,7 +8,6 @@
       <program name="Optitrack Distance Counter"/>
     </session>
     <session name="Flight UDP">
-      <program name="Log Plotter"/>
       <program name="Data Link">
         <arg flag="-udp"/>
       </program>
@@ -20,7 +19,32 @@
         <arg flag="--coordinate_north" constant="far"/>
         <arg flag="--craft_noses" constant="right"/>
         <arg flag="--long_edge" constant="near"/>
-        <arg flag="--streaming_ids" constant="168"/>
+        <arg flag="--streaming_ids" constant="183"/>
+        <arg flag="--ac_id" constant="42"/>
+      </program>
+      <program name="Server"/>
+      <program name="PprzGCS"/>
+      <program name="Joystick">
+        <arg flag="-ac" constant="bebop2_nn_cfc"/>
+        <arg flag="ps4_gamepad.xml"/>
+        <arg flag="-d" constant="0"/>
+      </program>
+    </session>
+    <session name="Flight UDP RL">
+      <program name="Log Plotter"/>
+      <program name="Data Link">
+        <arg flag="-udp"/>
+        <arg flag="-udp_broadcast"/>
+      </program>
+      <program name="UnifiedMoCap">
+        <arg flag="optitrack"/>
+        <arg flag="ivy"/>
+        <arg flag="--publish_frequency" constant="10"/>
+        <arg flag="--coordinate_system" constant="enu"/>
+        <arg flag="--coordinate_north" constant="far"/>
+        <arg flag="--craft_noses" constant="right"/>
+        <arg flag="--long_edge" constant="near"/>
+        <arg flag="--streaming_ids" constant="183"/>
         <arg flag="--ac_id" constant="42"/>
       </program>
       <program name="Server"/>

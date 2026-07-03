@@ -26,10 +26,10 @@
     <waypoint name="STDBY" x="1.9" y="1.0"/>
     <waypoint name="TD" x="0.8" y="-1.7" height="0.5"/>
     <!-- ENU coordinates that become the trained 3x4m NED rectangle in nn_cfc_control.c. -->
-    <waypoint name="NN_SQ_1" x="2.0" y="1.5" height="1.5"/>
-    <waypoint name="NN_SQ_2" x="2.0" y="-1.5" height="1.5"/>
-    <waypoint name="NN_SQ_3" x="-2.0" y="-1.5" height="1.5"/>
-    <waypoint name="NN_SQ_4" x="-2.0" y="1.5" height="1.5"/>
+    <waypoint name="NN_SQ_1" x="2.0" y="1.5" height="1.0"/>
+    <waypoint name="NN_SQ_2" x="2.0" y="-1.5" height="1.0"/>
+    <waypoint name="NN_SQ_3" x="-2.0" y="-1.5" height="1.0"/>
+    <waypoint name="NN_SQ_4" x="-2.0" y="1.5" height="1.0"/>
     <waypoint name="_CZ1" x="-5.0" y="-5.0"/>
     <waypoint name="_CZ2" x="-5.0" y="5.0"/>
     <waypoint name="_CZ3" x="5.0" y="5.0"/>
@@ -110,6 +110,7 @@
     </block>
 
     <block name="Holding point">
+      <call_once fun="nn_cfc_control_stop()"/>
       <call_once fun="NavKillThrottle()"/>
       <attitude pitch="0" roll="0" throttle="0" until="FALSE" vmode="throttle"/>
     </block>
@@ -163,25 +164,33 @@
       <!-- <call_once fun="logger_file_stop()"/> -->
       <call_once fun="setNav()"/>
       <call_once fun="NavSetWaypointHere(WP_TD)"/>
-      <go wp="TD"/>
-      <deroute block="Flare"/>
+      <call_once fun="NavStartDetectGround()"/>
+      <exception cond="NavDetectGround()" deroute="Holding point"/>
+      <exception cond="!nav_is_in_flight()" deroute="Landed"/>
+      <exception cond="0.10 @GT GetPosAlt()" deroute="Landed"/>
+      <stay climb="-0.15" vmode="climb" wp="TD" until="GetPosAlt() @LT 0.45"/>
+      <stay climb="-0.05" vmode="climb" wp="TD"/>
     </block>
     <block name="Land">
       <exception cond="0.55 @GEQ GetPosAlt()" deroute="Flare"/>
-      <exception cond="block_time @GT 5" deroute="Flare"/>
+      <exception cond="block_time @GT 12" deroute="Flare"/>
       <call_once fun="nn_cfc_control_stop()"/>
       <!-- <call_once fun="logger_file_stop()"/> -->
       <call_once fun="setNav()"/>
-      <go wp="TD"/>
+      <stay climb="-0.10" vmode="climb" wp="TD"/>
       <deroute block="Flare"/>
     </block>
 
     <block name="Flare">
+      <call_once fun="nn_cfc_control_stop()"/>
+      <!-- <call_once fun="logger_file_stop()"/> -->
+      <call_once fun="setNav()"/>
+      <call_once fun="NavStartDetectGround()"/>
       <exception cond="NavDetectGround()" deroute="Holding point"/>
       <exception cond="!nav_is_in_flight()" deroute="Landed"/>
       <exception cond="0.10 @GT GetPosAlt()" deroute="Landed"/>
-      <call_once fun="NavStartDetectGround()"/>
-      <stay climb="nav.descend_vspeed" vmode="climb" wp="TD"/>
+      <stay climb="-0.15" vmode="climb" wp="TD" until="GetPosAlt() @LT 0.45"/>
+      <stay climb="-0.05" vmode="climb" wp="TD"/>
     </block>
 
     <block name="Landed">

@@ -1,17 +1,18 @@
 /*
-File: nn_cfc_parameters.h
-Generated from: new_CFC_64_neurons_seq_1_epoch=18_val_loss=0.000142.ckpt
-Model kind: cfc_default
+File: nn_parameters.h
+Generated from: bbp2_conv_cfc_default_n64_epoch=19_val_loss=0.000143.ckpt
+Model kind: cfc_default conv front-end
 Input order: dx, dy, dz, vx, vy, vz, phi, theta, psi, p, q, r, Mx_ext, My_ext, Mz_ext, omega1, omega2, omega3, omega4
+Normalization: LNN_behavioural_cloning_quadrotor.utils.normalization_limits_bebop2
 */
-#ifndef NN_CFC_PARAMETERS_H
-#define NN_CFC_PARAMETERS_H
+#ifndef NN_PARAMETERS_H
+#define NN_PARAMETERS_H
 
 #define NUM_STATES 19
 #define NUM_CONTROLS 4
 #define CONV_FEATURES 256
 #define HIDDEN_SIZE 64
-
+#define CFC_TIMESPAN 0.01f
 
 extern const float input_norm_min[19];
 extern const float input_norm_max[19];

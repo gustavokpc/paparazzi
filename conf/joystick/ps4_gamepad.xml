@@ -33,10 +33,10 @@
 
 <joystick>
   <input>
-    <axis index="0" name="LeftStickHorizontal" exponent="0.7"/>
-    <axis index="1" name="LeftStickVertical" exponent="0.7"/>
+    <axis index="0" name="LeftStickHorizontal" exponent="1.0"/>
+    <axis index="1" name="LeftStickVertical" exponent="1.0"/>
     <axis index="2" name="L2" trim="127"/>
-    <axis index="3" name="RightStickHorizontal" exponent="0.7"/>
+    <axis index="3" name="RightStickHorizontal" exponent="1.0"/>
     <axis index="4" name="RightStickVertical"/>
     <axis index="5" name="R2" trim="127"/>
     <button index="0" name="X"/>

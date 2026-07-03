@@ -15,6 +15,10 @@
       <dl_settings name="NN CFC">
         <dl_setting var="nn_cfc_control_enabled" min="0" step="1" max="1" shortname="enabled" values="FALSE|TRUE" type="bool" module="modules/nn_cfc_control/nn_cfc_control"/>
         <dl_setting var="nn_cfc_control_periodic_count" min="0" step="1" max="1000000" shortname="periodic" type="uint32"/>
+        <dl_setting var="nn_cfc_control_periodic_dt_us" min="0" step="1" max="1000000" shortname="dt_us" type="uint32"/>
+        <dl_setting var="nn_cfc_control_sensor_read_time_us" min="0" step="1" max="1000000" shortname="sense_us" type="uint32"/>
+        <dl_setting var="nn_cfc_control_inference_time_us" min="0" step="1" max="1000000" shortname="infer_us" type="uint32"/>
+        <dl_setting var="nn_cfc_control_total_time_us" min="0" step="1" max="1000000" shortname="total_us" type="uint32"/>
         <dl_setting var="nn_cfc_control_waypoint_switch_count" min="0" step="1" max="1000000" shortname="wp_sw" type="uint32"/>
         <dl_setting var="nn_cfc_control_waypoint_index" min="0" step="1" max="3" shortname="wp_idx" type="uint32"/>
         <dl_setting var="nn_cfc_control_error[0]" min="-20" step="0.01" max="20" shortname="err_x" type="float"/>

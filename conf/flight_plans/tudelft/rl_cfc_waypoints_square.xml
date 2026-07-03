@@ -115,6 +115,7 @@
     </block>
 
     <block name="Holding point">
+      <call_once fun="rl_cfc_control_stop()"/>
       <call_once fun="NavKillThrottle()"/>
       <attitude pitch="0" roll="0" throttle="0" until="FALSE" vmode="throttle"/>
     </block>
@@ -177,11 +178,15 @@
     </block>
 
     <block name="Flare">
+      <call_once fun="rl_cfc_control_stop()"/>
+      <call_once fun="setNav()"/>
+      <call_once fun="NavSetWaypointHere(WP_TD)"/>
+      <call_once fun="NavStartDetectGround()"/>
       <exception cond="NavDetectGround()" deroute="Holding point"/>
       <exception cond="!nav_is_in_flight()" deroute="Landed"/>
       <exception cond="0.10 @GT GetPosAlt()" deroute="Landed"/>
-      <call_once fun="NavStartDetectGround()"/>
-      <stay climb="nav.descend_vspeed" vmode="climb" wp="TD"/>
+      <stay climb="-0.30" vmode="climb" wp="TD" until="GetPosAlt() @LT 0.45"/>
+      <stay climb="-0.15" vmode="climb" wp="TD"/>
     </block>
 
     <block name="Landed">

@@ -4,7 +4,7 @@
   <section name="SIMULATOR" prefix="NPS_">
     <define name="ACTUATOR_THRUSTS" value="2.80, 2.80, 2.80, 2.80" type="float[]"/>
     <define name="ACTUATOR_TORQUES" value="0.05, 0.05, 0.05, 0.05" type="float[]"/>
-    <define name="ACTUATOR_TIME_CONSTANTS" value="0.02, 0.02, 0.02, 0.02" type="float[]"/>
+    <define name="ACTUATOR_TIME_CONSTANTS" value="0.03, 0.03, 0.03, 0.03" type="float[]"/>
     <define name="ACTUATOR_MAX_ANGULAR_MOMENTUM" value="0.5, 0.5, 0.5, 0.5" type="float[]"/>
     <define name="GAZEBO_AC_NAME" value="bebop2" type="string"/>
     <define name="BYPASS_AHRS" value="1"/>

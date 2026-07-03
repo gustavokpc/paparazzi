@@ -1,48 +1,39 @@
-/*
-File: rl_cfc_parameters.h
-Generated from: Quadcopter3DGatesGym-v0/recurrent_ppo_cfc_baseline/recurrent_ppo_cfc_baseline.zip
-Model kind: cfc
-Input: raw RL observation vector used by the Stable-Baselines3 policy.
-*/
-#ifndef RECURRENT_PPO_CFC_BASELINE_RL_CFC_PARAMETERS_H
-#define RECURRENT_PPO_CFC_BASELINE_RL_CFC_PARAMETERS_H
+#ifndef RL_CFC_PARAMETERS_H
+#define RL_CFC_PARAMETERS_H
 
-#define OBS_SIZE 20
+/* File: rl_cfc_parameters.h
+ * Generated from: recurrent_ppo_figure8_gates.zip
+ */
+#define NUM_STATES 20
 #define NUM_CONTROLS 4
+#define CFC_INPUT_DIM 20
 #define HIDDEN_SIZE 64
+#define POLICY_HIDDEN_DIM 64
+#define CFC_TIMESPAN 0.01f
+#define LTC_ODE_UNFOLDS 6
 
-/* Constants used by deterministic actor inference, flattened in PyTorch row-major order. */
-/* mlp_extractor.policy_net.0.weight: (64, 64) */
-extern const float mlp_extractor_policy_net_0_weight[4096];
-/* mlp_extractor.policy_net.0.bias: (64,) */
-extern const float mlp_extractor_policy_net_0_bias[64];
-/* mlp_extractor.policy_net.2.weight: (64, 64) */
-extern const float mlp_extractor_policy_net_2_weight[4096];
-/* mlp_extractor.policy_net.2.bias: (64,) */
-extern const float mlp_extractor_policy_net_2_bias[64];
-/* action_net.weight: (4, 64) */
-extern const float action_net_weight[256];
-/* action_net.bias: (4,) */
-extern const float action_net_bias[4];
-/* lstm_actor.rnn_cell.backbone.0.weight: (128, 84) */
-extern const float lstm_actor_rnn_cell_backbone_0_weight[10752];
-/* lstm_actor.rnn_cell.backbone.0.bias: (128,) */
-extern const float lstm_actor_rnn_cell_backbone_0_bias[128];
-/* lstm_actor.rnn_cell.ff1.weight: (64, 128) */
-extern const float lstm_actor_rnn_cell_ff1_weight[8192];
-/* lstm_actor.rnn_cell.ff1.bias: (64,) */
-extern const float lstm_actor_rnn_cell_ff1_bias[64];
-/* lstm_actor.rnn_cell.ff2.weight: (64, 128) */
-extern const float lstm_actor_rnn_cell_ff2_weight[8192];
-/* lstm_actor.rnn_cell.ff2.bias: (64,) */
-extern const float lstm_actor_rnn_cell_ff2_bias[64];
-/* lstm_actor.rnn_cell.time_a.weight: (64, 128) */
-extern const float lstm_actor_rnn_cell_time_a_weight[8192];
-/* lstm_actor.rnn_cell.time_a.bias: (64,) */
-extern const float lstm_actor_rnn_cell_time_a_bias[64];
-/* lstm_actor.rnn_cell.time_b.weight: (64, 128) */
-extern const float lstm_actor_rnn_cell_time_b_weight[8192];
-/* lstm_actor.rnn_cell.time_b.bias: (64,) */
-extern const float lstm_actor_rnn_cell_time_b_bias[64];
+extern const float LTC_GLEAK[64];
+extern const float LTC_VLEAK[64];
+extern const float LTC_CM[64];
+extern const float LTC_SIGMA[4096];
+extern const float LTC_MU[4096];
+extern const float LTC_W[4096];
+extern const float LTC_EREV[4096];
+extern const float LTC_SENSORY_SIGMA[1280];
+extern const float LTC_SENSORY_MU[1280];
+extern const float LTC_SENSORY_W[1280];
+extern const float LTC_SENSORY_EREV[1280];
+extern const float LTC_SPARSITY_MASK[4096];
+extern const float LTC_SENSORY_SPARSITY_MASK[1280];
+extern const float LTC_INPUT_W[20];
+extern const float LTC_INPUT_B[20];
+extern const float LTC_OUTPUT_W[64];
+extern const float LTC_OUTPUT_B[64];
+extern const float POLICY0_WEIGHT[4096];
+extern const float POLICY0_BIAS[64];
+extern const float POLICY2_WEIGHT[4096];
+extern const float POLICY2_BIAS[64];
+extern const float ACTION_WEIGHT[256];
+extern const float ACTION_BIAS[4];
 
-#endif /* RECURRENT_PPO_CFC_BASELINE_RL_CFC_PARAMETERS_H */
+#endif

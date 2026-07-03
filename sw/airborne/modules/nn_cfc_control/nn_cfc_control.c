@@ -10,7 +10,7 @@
  *   Paparazzi gives local position/velocity as ENU; this wrapper first maps it
  *   to the model world frame {Y, X, -Z}, then applies the same world->body
  *   rotation used by the Python C-controller simulator.
- * - nn_cfc_control() returns normalized motor commands in [0,1]. The wrapper
+ * - nn_control() returns normalized motor commands in [0,1]. The wrapper
  *   keeps the trained RPM scale and applies RPM commands directly on Bebop.
  * - The airframe command_laws keep the normal autopilot actuator path as a
  *   fallback; nn_cfc_control_apply_motor_rpm() overwrites it only when the NN is
@@ -20,12 +20,33 @@
 #include "modules/nn_cfc_control/nn_cfc_control.h"
 #include "modules/nn_cfc_control/nn_cfc_operations.h"
 
+/*
+ * Exported NN files are not fully consistent across generated models:
+ * some expose nn_reset()/nn_control(), others expose nn_cfc_reset()/
+ * nn_cfc_control() plus nn_cfc_last_raw_control. Keep the wrapper compatible
+ * with both so operations/parameters can be swapped without touching control.
+ */
+#if defined(NN_CFC_OPERATIONS_H) && !defined(NN_OPERATIONS_H)
+#define NN_NET_RESET() nn_cfc_reset()
+#define NN_NET_CONTROL(state, control) nn_cfc_control((state), (control))
+#define NN_NET_HAS_LAST_RAW_CONTROL 1
+#else
+#define NN_NET_RESET() nn_reset()
+#define NN_NET_CONTROL(state, control) nn_control((state), (control))
+#define NN_NET_HAS_LAST_RAW_CONTROL 0
+#endif
+
 #include "paparazzi.h"
 #include "state.h"
 #include "generated/airframe.h"
 #include "generated/flight_plan.h"
 #include "generated/modules.h"
+#include "mcu_periph/sys_time.h"
 #include "modules/nav/waypoints.h"
+
+#ifdef SITL
+#include <sys/time.h>
+#endif
 
 #ifdef MODULE_LOGGER_FILE_ID
 #include "modules/loggers/logger_file.h"
@@ -55,11 +76,11 @@
 
 /*
  * Controller configuration.
- * Change the NN_CFC_* values here; conf/modules/nn_cfc_control.xml only exposes
- * debug/telemetry variables so there is a single source of truth.
+ * Change the NN_CFC_* values here; XML files should only expose debug/telemetry
+ * variables so there is a single source of truth.
  */
 #ifndef NN_CFC_REACHED_RADIUS_M
-#define NN_CFC_REACHED_RADIUS_M 0.15f
+#define NN_CFC_REACHED_RADIUS_M 0.001f
 #endif
 
 #ifndef NN_CFC_TARGET_ALT_M
@@ -79,9 +100,11 @@
 #define NN_CFC_MAX_RPM 10000.0f
 #endif
 
-#ifndef NN_CFC_REVERSE_YAW_OUTPUT
-#define NN_CFC_REVERSE_YAW_OUTPUT FALSE
+/* Keep this in C so the NN output convention is not silently overridden by XML. */
+#ifdef NN_CFC_REVERSE_YAW_OUTPUT
+#undef NN_CFC_REVERSE_YAW_OUTPUT
 #endif
+#define NN_CFC_REVERSE_YAW_OUTPUT TRUE
 
 /*
  * NPS/Gazebo conversion used only when this module is compiled without the
@@ -101,6 +124,33 @@
 
 #ifndef NN_CFC_NPS_DEFAULT_MAX_THRUST_N
 #define NN_CFC_NPS_DEFAULT_MAX_THRUST_N 2.80f
+#endif
+
+/*
+ * Controller call period used by wrapper-side simulation helpers. Some exported
+ * recurrent networks define CFC_TIMESPAN because the cell itself needs it; plain
+ * feed-forward/CFC exports may not. Keep a wrapper fallback so swapping networks
+ * does not break this module.
+ */
+#ifndef NN_CFC_CONTROL_TIMESPAN_S
+#ifdef CFC_TIMESPAN
+#define NN_CFC_CONTROL_TIMESPAN_S CFC_TIMESPAN
+#else
+#define NN_CFC_CONTROL_TIMESPAN_S 0.01f
+#endif
+#endif
+
+/*
+ * Gazebo/NPS does not expose a measured motor RPM like the real Bebop driver.
+ * Keep a small local motor-speed estimate for the NN feedback input, matching
+ * the first-order motor model used in training.
+ */
+#ifndef NN_CFC_SIM_MOTOR_TAU_S
+#define NN_CFC_SIM_MOTOR_TAU_S 0.03f
+#endif
+
+#ifndef NN_CFC_TRAIN_HOVER_RPM
+#define NN_CFC_TRAIN_HOVER_RPM 7746.62f
 #endif
 
 typedef struct {
@@ -123,6 +173,10 @@ int32_t nn_cfc_control_motor_rpm_cmd[4] = {0, 0, 0, 0};
 int32_t nn_cfc_control_applied_rpm_cmd[4] = {0, 0, 0, 0};
 int32_t nn_cfc_control_raw_mean_rpm = 0;
 unsigned int nn_cfc_control_periodic_count = 0U;
+uint32_t nn_cfc_control_periodic_dt_us = 0U;
+uint32_t nn_cfc_control_sensor_read_time_us = 0U;
+uint32_t nn_cfc_control_inference_time_us = 0U;
+uint32_t nn_cfc_control_total_time_us = 0U;
 unsigned int nn_cfc_control_waypoint_switch_count = 0U;
 float nn_cfc_control_reached_radius_m = NN_CFC_REACHED_RADIUS_M;
 float nn_cfc_control_target[3] = {0.f, 0.f, 0.f};
@@ -145,6 +199,16 @@ float nn_cfc_control_net_output_raw[4] = {0.f, 0.f, 0.f, 0.f};
 float nn_cfc_control_net_input_state[19] = {0.f};
 float nn_cfc_control_net_input_normalized[19] = {0.f};
 float nn_cfc_control_log_values[38] = {0.f};
+static float nn_cfc_control_timing_values[4] = {0.f, 0.f, 0.f, 0.f};
+static uint32_t nn_cfc_control_last_periodic_start_us = 0U;
+#if !NN_CFC_HAS_BEBOP_ACTUATORS
+static float nn_cfc_control_sim_rpm_est[4] = {
+  NN_CFC_TRAIN_HOVER_RPM,
+  NN_CFC_TRAIN_HOVER_RPM,
+  NN_CFC_TRAIN_HOVER_RPM,
+  NN_CFC_TRAIN_HOVER_RPM
+};
+#endif
 
 /* Network outputs use Paparazzi's QUAD_X motor order: front-left, front-right, back-right, back-left. */
 static const uint8_t nn_cfc_net_to_phys_motor[4] = {
@@ -162,6 +226,17 @@ static const nn_vec3_t nn_square_waypoints[] = {
   {-2.0f,  1.5f, NN_CFC_TARGET_ALT_M},
 };
 static const unsigned int nn_num_square_waypoints = sizeof(nn_square_waypoints) / sizeof(nn_square_waypoints[0]);
+
+static uint32_t nn_cfc_timing_now_usec(void)
+{
+#ifdef SITL
+  struct timeval tv;
+  gettimeofday(&tv, NULL);
+  return (uint32_t)(tv.tv_sec * 1000000ULL + tv.tv_usec);
+#else
+  return get_sys_time_usec();
+#endif
+}
 
 static nn_vec3_t get_square_waypoint(unsigned int index)
 {
@@ -224,10 +299,10 @@ __attribute__((weak)) void nn_cfc_get_motor_feedback_rpm(float omega_rpm[4])
     omega_rpm[i] = (float)actuators_bebop.rpm_obs[nn_cfc_net_to_phys_motor[i]];
   }
 #else
-  omega_rpm[0] = nn_cfc_control_last_rpm[0];
-  omega_rpm[1] = nn_cfc_control_last_rpm[1];
-  omega_rpm[2] = nn_cfc_control_last_rpm[2];
-  omega_rpm[3] = nn_cfc_control_last_rpm[3];
+  omega_rpm[0] = nn_cfc_control_sim_rpm_est[0];
+  omega_rpm[1] = nn_cfc_control_sim_rpm_est[1];
+  omega_rpm[2] = nn_cfc_control_sim_rpm_est[2];
+  omega_rpm[3] = nn_cfc_control_sim_rpm_est[3];
 #endif
 }
 
@@ -237,6 +312,28 @@ static float clampf(float x, float lo, float hi)
   if (x > hi) return hi;
   return x;
 }
+
+#if !NN_CFC_HAS_BEBOP_ACTUATORS
+static void reset_sim_motor_feedback_rpm(float rpm)
+{
+  rpm = clampf(rpm, NN_CFC_MIN_RPM, NN_CFC_MAX_RPM);
+  for (uint8_t i = 0U; i < 4U; i++) {
+    nn_cfc_control_sim_rpm_est[i] = rpm;
+  }
+}
+
+static void update_sim_motor_feedback_rpm(void)
+{
+  const float dt = NN_CFC_CONTROL_TIMESPAN_S > 0.f ? NN_CFC_CONTROL_TIMESPAN_S : 0.01f;
+  const float tau = NN_CFC_SIM_MOTOR_TAU_S > 0.f ? NN_CFC_SIM_MOTOR_TAU_S : dt;
+  const float alpha = clampf(1.f - expf(-dt / tau), 0.f, 1.f);
+
+  for (uint8_t i = 0U; i < 4U; i++) {
+    const float rpm_target = clampf(nn_cfc_control_last_rpm[i], NN_CFC_MIN_RPM, NN_CFC_MAX_RPM);
+    nn_cfc_control_sim_rpm_est[i] += alpha * (rpm_target - nn_cfc_control_sim_rpm_est[i]);
+  }
+}
+#endif
 
 static void clamp_state_to_training_range(float state[NUM_STATES])
 {
@@ -266,15 +363,23 @@ static void update_log_values(void)
     nn_cfc_control_log_values[i] = nn_cfc_control_net_input_state[i];
     nn_cfc_control_log_values[NUM_STATES + i] = nn_cfc_control_net_input_normalized[i];
   }
+  nn_cfc_control_timing_values[0] = (float)nn_cfc_control_periodic_dt_us;
+  nn_cfc_control_timing_values[1] = (float)nn_cfc_control_sensor_read_time_us;
+  nn_cfc_control_timing_values[2] = (float)nn_cfc_control_inference_time_us;
+  nn_cfc_control_timing_values[3] = (float)nn_cfc_control_total_time_us;
 }
 
 #if PERIODIC_TELEMETRY
 static void nn_cfc_control_send_telemetry(struct transport_tx *trans, struct link_device *dev)
 {
-  char name[] = "NN_CFC_INPUTS";
+  char inputs_name[] = "NN_CFC_INPUTS";
   pprz_msg_send_DEBUG_VECT(trans, dev, AC_ID,
-                           strlen(name), name,
+                           strlen(inputs_name), inputs_name,
                            38, nn_cfc_control_log_values);
+  char timing_name[] = "NN_CFC_TIMING";
+  pprz_msg_send_DEBUG_VECT(trans, dev, AC_ID,
+                           strlen(timing_name), timing_name,
+                           4, nn_cfc_control_timing_values);
 }
 #endif
 
@@ -322,11 +427,6 @@ static int32_t rpm_to_command(float rpm)
 static void apply_yaw_output_convention(float motor_norm[4])
 {
 #if NN_CFC_REVERSE_YAW_OUTPUT
-  /*
-   * Bebop2 uses MOTOR_MIXING_REVERSE=TRUE in the normal mixer, but this module
-   * bypasses the mixer and writes RPM directly. Flip only the yaw component of
-   * the network's QUAD_X motor vector, preserving thrust/roll/pitch.
-   */
   const float fl = motor_norm[0];
   const float fr = motor_norm[1];
   const float br = motor_norm[2];
@@ -335,12 +435,12 @@ static void apply_yaw_output_convention(float motor_norm[4])
   const float thrust = 0.25f * (fl + fr + br + bl);
   const float roll = 0.25f * (fl - fr - br + bl);
   const float pitch = 0.25f * (fl + fr - br - bl);
-  const float yaw = 0.25f * (-fl + fr - br + bl);
+  const float yaw = -0.25f * (-fl + fr - br + bl);
 
-  motor_norm[0] = clampf(thrust + roll + pitch + yaw, 0.f, 1.f);
-  motor_norm[1] = clampf(thrust - roll + pitch - yaw, 0.f, 1.f);
-  motor_norm[2] = clampf(thrust - roll - pitch + yaw, 0.f, 1.f);
-  motor_norm[3] = clampf(thrust + roll - pitch - yaw, 0.f, 1.f);
+  motor_norm[0] = clampf(thrust + roll + pitch - yaw, 0.f, 1.f);
+  motor_norm[1] = clampf(thrust - roll + pitch + yaw, 0.f, 1.f);
+  motor_norm[2] = clampf(thrust - roll - pitch - yaw, 0.f, 1.f);
+  motor_norm[3] = clampf(thrust + roll - pitch + yaw, 0.f, 1.f);
 #else
   (void)motor_norm;
 #endif
@@ -466,7 +566,6 @@ static void maybe_advance_waypoint(const nn_vec3_t pos)
   if (d2 < reached_radius * reached_radius) {
     nn_cfc_control_waypoint_index = (nn_cfc_control_waypoint_index + 1U) % nn_num_square_waypoints;
     nn_cfc_control_waypoint_switch_count++;
-    // nn_cfc_reset(); // dont know
   }
   update_target_debug(pos, get_square_waypoint(nn_cfc_control_waypoint_index));
 }
@@ -477,16 +576,29 @@ void nn_cfc_control_init(void)
   nn_cfc_control_enabled = false;
   nn_cfc_control_waypoint_index = 0U;
   nn_cfc_control_periodic_count = 0U;
+  nn_cfc_control_periodic_dt_us = 0U;
+  nn_cfc_control_sensor_read_time_us = 0U;
+  nn_cfc_control_inference_time_us = 0U;
+  nn_cfc_control_total_time_us = 0U;
+  nn_cfc_control_last_periodic_start_us = 0U;
   nn_cfc_control_waypoint_switch_count = 0U;
   for (unsigned int i = 0; i < 4U; i++) {
     nn_cfc_control_last_norm[i] = 0.f;
+#if !NN_CFC_HAS_BEBOP_ACTUATORS
+    nn_cfc_control_last_rpm[i] = NN_CFC_TRAIN_HOVER_RPM;
+    nn_cfc_control_feedback_rpm[i] = NN_CFC_TRAIN_HOVER_RPM;
+#else
     nn_cfc_control_last_rpm[i] = 0.f;
+    nn_cfc_control_feedback_rpm[i] = 0.f;
+#endif
     nn_cfc_control_motor_rpm_cmd[i] = 0;
     nn_cfc_control_applied_rpm_cmd[i] = 0;
-    nn_cfc_control_feedback_rpm[i] = 0.f;
     nn_cfc_control_net_output_norm[i] = 0.f;
     nn_cfc_control_net_output_raw[i] = 0.f;
   }
+#if !NN_CFC_HAS_BEBOP_ACTUATORS
+  reset_sim_motor_feedback_rpm(NN_CFC_TRAIN_HOVER_RPM);
+#endif
   for (unsigned int i = 0; i < 3U; i++) {
     nn_cfc_control_external_moment_nm[i] = 0.f;
   }
@@ -497,9 +609,15 @@ void nn_cfc_control_init(void)
   for (unsigned int i = 0; i < 38U; i++) {
     nn_cfc_control_log_values[i] = 0.f;
   }
+  nn_cfc_control_timing_values[0] = 0.f;
+  nn_cfc_control_timing_values[1] = 0.f;
+  nn_cfc_control_timing_values[2] = 0.f;
+  nn_cfc_control_timing_values[3] = 0.f;
   nn_cfc_control_raw_mean_rpm = 0;
   reset_target_debug();
-  nn_cfc_reset();
+  nn_cfc_control_waypoint_index = NN_CFC_START_WAYPOINT_INDEX % nn_num_square_waypoints;
+  update_target_debug(nn_cfc_get_position_m(), get_square_waypoint(nn_cfc_control_waypoint_index));
+  NN_NET_RESET();
 #ifdef MODULE_LOGGER_FILE_ID
   logger_file_start();
 #endif
@@ -517,18 +635,31 @@ void nn_cfc_control_start(void)
    */
   nn_cfc_control_enabled = true;
   nn_cfc_control_periodic_count = 0U;
+  nn_cfc_control_periodic_dt_us = 0U;
+  nn_cfc_control_sensor_read_time_us = 0U;
+  nn_cfc_control_inference_time_us = 0U;
+  nn_cfc_control_total_time_us = 0U;
+  nn_cfc_control_last_periodic_start_us = 0U;
   nn_cfc_control_waypoint_switch_count = 0U;
   for (unsigned int i = 0; i < 4U; i++) {
     nn_cfc_control_last_norm[i] = 0.f;
+#if !NN_CFC_HAS_BEBOP_ACTUATORS
+    nn_cfc_control_last_rpm[i] = NN_CFC_TRAIN_HOVER_RPM;
+    nn_cfc_control_feedback_rpm[i] = NN_CFC_TRAIN_HOVER_RPM;
+#else
     nn_cfc_control_last_rpm[i] = NN_CFC_MIN_RPM;
+    nn_cfc_control_feedback_rpm[i] = NN_CFC_MIN_RPM;
+#endif
     nn_cfc_control_motor_rpm_cmd[i] = 0;
     nn_cfc_control_applied_rpm_cmd[i] = 0;
-    nn_cfc_control_feedback_rpm[i] = NN_CFC_MIN_RPM;
   }
+#if !NN_CFC_HAS_BEBOP_ACTUATORS
+  reset_sim_motor_feedback_rpm(NN_CFC_TRAIN_HOVER_RPM);
+#endif
   nn_cfc_control_raw_mean_rpm = 0;
   nn_cfc_control_waypoint_index = NN_CFC_START_WAYPOINT_INDEX % nn_num_square_waypoints;
   update_target_debug(nn_cfc_get_position_m(), get_square_waypoint(nn_cfc_control_waypoint_index));
-  nn_cfc_reset();
+  NN_NET_RESET();
 #ifdef MODULE_LOGGER_FILE_ID
   logger_file_start();
 #endif
@@ -538,6 +669,11 @@ void nn_cfc_control_stop(void)
 {
   /* Stop neural control and return future command_law calls to autopilot. */
   nn_cfc_control_enabled = false;
+  nn_cfc_control_periodic_dt_us = 0U;
+  nn_cfc_control_sensor_read_time_us = 0U;
+  nn_cfc_control_inference_time_us = 0U;
+  nn_cfc_control_total_time_us = 0U;
+  nn_cfc_control_last_periodic_start_us = 0U;
   for (unsigned int i = 0; i < 4U; i++) {
     nn_cfc_control_last_norm[i] = 0.f;
     nn_cfc_control_last_rpm[i] = 0.f;
@@ -545,12 +681,12 @@ void nn_cfc_control_stop(void)
     nn_cfc_control_applied_rpm_cmd[i] = 0;
     nn_cfc_control_feedback_rpm[i] = 0.f;
   }
+#if !NN_CFC_HAS_BEBOP_ACTUATORS
+  reset_sim_motor_feedback_rpm(NN_CFC_TRAIN_HOVER_RPM);
+#endif
   nn_cfc_control_raw_mean_rpm = 0;
   reset_target_debug();
-  nn_cfc_reset();
-#ifdef MODULE_LOGGER_FILE_ID
-  logger_file_stop();
-#endif
+  NN_NET_RESET();
 }
 
 void nn_cfc_control_periodic(void)
@@ -558,15 +694,22 @@ void nn_cfc_control_periodic(void)
   if (!nn_cfc_control_enabled) {
     return;
   }
+  const uint32_t periodic_start_us = nn_cfc_timing_now_usec();
+  if (nn_cfc_control_last_periodic_start_us != 0U) {
+    nn_cfc_control_periodic_dt_us = periodic_start_us - nn_cfc_control_last_periodic_start_us;
+  } else {
+    nn_cfc_control_periodic_dt_us = 0U;
+  }
+  nn_cfc_control_last_periodic_start_us = periodic_start_us;
   nn_cfc_control_periodic_count++;
 
   /*
    * 1. Update waypoint bookkeeping and compute the current ENU error. This is
    *    navigation/debug state; motor commands are still produced by the NN.
    */
+  const uint32_t sensor_read_start_us = nn_cfc_timing_now_usec();
   const nn_vec3_t pos = nn_cfc_get_position_m();
   maybe_advance_waypoint(pos);
-
   const nn_vec3_t vel = nn_cfc_get_velocity_mps();
   const nn_vec3_t err = {
     nn_cfc_control_error[0],
@@ -602,6 +745,7 @@ void nn_cfc_control_periodic(void)
   for (unsigned int i = 0; i < 4U; i++) {
     nn_cfc_control_feedback_rpm[i] = omega[i];
   }
+  nn_cfc_control_sensor_read_time_us = nn_cfc_timing_now_usec() - sensor_read_start_us;
 
   /*
    * 3. Assemble the exact 19-value vector expected by nn_cfc_parameters.h.
@@ -615,7 +759,7 @@ void nn_cfc_control_periodic(void)
     mext.x, mext.y, mext.z,
     omega[0], omega[1], omega[2], omega[3]
   };
-  // clamp_state_to_training_range(state);  Disable to test rob
+  // clamp_state_to_training_range(state); // Disable to test rob
 
   /* 4. Save raw/normalized inputs before inference for logger_file and telemetry. */
   for (unsigned int i = 0; i < NUM_STATES; i++) {
@@ -625,20 +769,33 @@ void nn_cfc_control_periodic(void)
 
   /* 5. Run the exported CFC network. Output is normalized motor command [0,1]. */
   float normalized_cmd[NUM_CONTROLS];
-  nn_cfc_control(state, normalized_cmd);
+  const uint32_t inference_start_us = nn_cfc_timing_now_usec();
+  NN_NET_CONTROL(state, normalized_cmd);
+  nn_cfc_control_inference_time_us = nn_cfc_timing_now_usec() - inference_start_us;
+  float network_raw_cmd[NUM_CONTROLS];
+  for (unsigned int i = 0; i < NUM_CONTROLS; i++) {
+    network_raw_cmd[i] = normalized_cmd[i];
+  }
   apply_yaw_output_convention(normalized_cmd);
 
   /* 6. Convert normalized outputs directly to the trained RPM command range. */
   for (unsigned int i = 0; i < 4U; i++) {
     nn_cfc_control_last_norm[i] = clampf(normalized_cmd[i], 0.f, 1.f);  // already clamped
     nn_cfc_control_net_output_norm[i] = normalized_cmd[i];
+#if NN_NET_HAS_LAST_RAW_CONTROL
     nn_cfc_control_net_output_raw[i] = nn_cfc_last_raw_control[i];
+#else
+    nn_cfc_control_net_output_raw[i] = network_raw_cmd[i];
+#endif
     const float trained_rpm =
         NN_CFC_MIN_RPM +
         nn_cfc_control_last_norm[i] * (NN_CFC_MAX_RPM - NN_CFC_MIN_RPM);
     nn_cfc_control_last_rpm[i] = trained_rpm;
     nn_cfc_control_motor_rpm_cmd[nn_cfc_net_to_phys_motor[i]] = rpm_to_command(nn_cfc_control_last_rpm[i]);
   }
+#if !NN_CFC_HAS_BEBOP_ACTUATORS
+  update_sim_motor_feedback_rpm();
+#endif
 
   /* 7. Update summary values and telemetry vector used by the normal CSV log. */
   float norm_sum = 0.f;
@@ -649,6 +806,8 @@ void nn_cfc_control_periodic(void)
   }
   nn_cfc_control_mean_norm = norm_sum / 4.f;
   nn_cfc_control_mean_rpm_cmd = rpm_sum / 4;
+  update_motor_command_debug();
+  nn_cfc_control_total_time_us = nn_cfc_timing_now_usec() - periodic_start_us;
   update_log_values();
 }
 
@@ -661,6 +820,9 @@ void nn_cfc_control_apply_motor_rpm(bool motors_on)
    * - PPRZ thrust-equivalent command on NPS/Gazebo builds.
    */
   if (!motors_on || !nn_cfc_control_enabled) {
+    for (uint8_t i = 0U; i < 4U; i++) {
+      nn_cfc_control_applied_rpm_cmd[i] = 0;
+    }
     return;
   }
 

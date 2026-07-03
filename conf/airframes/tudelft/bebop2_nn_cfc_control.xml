@@ -9,8 +9,8 @@
 
   <firmware name="rotorcraft">
     <target name="ap" board="bebop2">
-      <configure name="HOST" value="192.168.52.1"/>
-      <configure name="MODEM_HOST" value="192.168.52.255"/>
+      <configure name="HOST" value="192.168.59.1"/>
+      <configure name="MODEM_HOST" value="192.168.59.255"/>
       <define name="LOGGER_FILE_PATH" value="/data/ftp/internal_000/log"/>
       <module name="ahrs" type="int_cmpl_quat">
         <configure name="USE_MAGNETOMETER" value="FALSE"/>
@@ -29,6 +29,7 @@
     
     <define name="USE_SONAR" value="FALSE"/>
     <define name="ARRIVED_AT_WAYPOINT" value="0.3"/>
+    <define name="NAV_DESCEND_VSPEED" value="-0.30"/>
 
     <!-- Subsystem section -->
     <module name="telemetry" type="transparent_udp"/>
@@ -69,10 +70,6 @@
     <define name="TYPE" value="QUAD_X"/>
   </section>
 
-  <section name="NN_CFC_CONTROL" prefix="NN_CFC_">
-    <define name="REVERSE_YAW_OUTPUT" value="TRUE"/>
-  </section>
-
   <command_laws>
     <call fun="motor_mixing_run(autopilot_get_motors_on(),FALSE,values)"/>
     <set servo="TOP_LEFT" value="motor_mixing.commands[MOTOR_FRONT_LEFT]"/>
@@ -83,13 +80,35 @@
   </command_laws>
 
   <section name="IMU" prefix="IMU_">
-    <!-- Magneto calibration -->
+    <define name="ACCEL_CALIB" type="array">
+    <field type="struct">
+      <field name="abi_id" value="1"/>
+      <field name="calibrated" type="struct">
+        <field name="neutral" value="true"/>
+        <field name="scale_f" value="true"/>
+      </field>
+      <field name="neutral" value="55,14,-457" type="int[]"/>
+      <field name="scale_f" value="{ 2.4516, 2.4522, 2.4194 }"/>
+    </field>
+  </define>
+  <define name="MAG_CALIB" type="array">
+  <field type="struct">
+    <field name="abi_id" value="1"/>
+    <field name="calibrated" type="struct">
+      <field name="neutral" value="true"/>
+      <field name="scale_f" value="true"/>
+    </field>
+    <field name="neutral" value="46,-151,269" type="int[]"/>
+    <field name="scale_f" value="{ 7.5824, 8.1333, 7.9168 }"/>
+  </field>
+</define>
+    <!-- Magneto calibration
     <define name="MAG_X_NEUTRAL" value="-16"/>
     <define name="MAG_Y_NEUTRAL" value="55"/>
     <define name="MAG_Z_NEUTRAL" value="204"/>
     <define name="MAG_X_SENS" value="7.28514789391" integer="16"/>
     <define name="MAG_Y_SENS" value="7.33022132691" integer="16"/>
-    <define name="MAG_Z_SENS" value="7.57102035692" integer="16"/>
+    <define name="MAG_Z_SENS" value="7.57102035692" integer="16"/> -->
   </section>
   
   <section name="AHRS" prefix="AHRS_">
@@ -97,6 +116,7 @@
     <define name="H_Y" value="-0.00242783"/>
     <define name="H_Z" value="0.858336"/>
     <define name="HEADING_UPDATE_GPS_MIN_SPEED" value="0"/>
+    <define name="AHRS_PROPAGATE_LOW_PASS_RATES" value="TRUE"/>
   </section>
 
   <section name="INS" prefix="INS_">

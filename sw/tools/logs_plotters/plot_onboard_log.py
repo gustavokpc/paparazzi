@@ -133,7 +133,7 @@ def active_motor_xlim(data, threshold_rpm, pad_s):
     )
 
 
-def generate(path, output_base, threshold_rpm, pad_s):
+def generate(path, output_base, threshold_rpm, pad_s, nn_active_only=False, nn_active_until=None):
     columns, data = read_csv(path)
     if "time" not in data:
         raise SystemExit(f"{path} has no time column")
@@ -142,6 +142,8 @@ def generate(path, output_base, threshold_rpm, pad_s):
     nn_intervals = intervals_from_mask(data["time"], nn_active, min_duration_s=0.5)
 
     out_dir = output_base / path.stem
+    if nn_active_only:
+        out_dir /= "nn_active"
     out_dir.mkdir(parents=True, exist_ok=True)
 
     state_groups = [
@@ -152,6 +154,15 @@ def generate(path, output_base, threshold_rpm, pad_s):
         ("rpm_obs", RPM_OBS_COLS),
         ("rpm_ref", RPM_REF_COLS),
         ("cmd", CMD_COLS),
+    ]
+    all_state_groups = [
+        ("pos [m]", ["pos_x", "pos_y", "pos_z"]),
+        ("vel [m/s]", ["vel_x", "vel_y", "vel_z"]),
+        ("att [rad]", ["att_phi", "att_theta", "att_psi"]),
+        ("rates [rad/s]", ["rate_p", "rate_q", "rate_r"]),
+    ]
+    body_rate_groups = [
+        ("body rates [rad/s]", ["rate_p", "rate_q", "rate_r"]),
     ]
     nn_raw_groups = [
         ("NN raw error", ["nn_in_dx_raw", "nn_in_dy_raw", "nn_in_dz_raw"]),
@@ -173,16 +184,52 @@ def generate(path, output_base, threshold_rpm, pad_s):
     ]
 
     outputs = []
-    outputs.append((out_dir / f"{path.stem}_state_commands_full.png", state_groups, None, "state, commands and RPM - full"))
-    outputs.append((out_dir / f"{path.stem}_nn_raw_outputs_full.png", nn_raw_groups, None, "NN raw inputs and outputs - full"))
-    outputs.append((out_dir / f"{path.stem}_nn_normalized_full.png", nn_norm_groups, None, "NN normalized inputs - full"))
+    plotted_nn_intervals = nn_intervals
+    if nn_active_only:
+        if not nn_intervals:
+            raise SystemExit(f"{path} has no interval with the NN active")
+        nn_start = nn_intervals[0][0]
+        nn_end = nn_intervals[-1][1]
+        if nn_active_until is not None:
+            nn_end = min(nn_end, nn_active_until)
+        if nn_end <= nn_start:
+            raise SystemExit(f"{path} has no NN-active samples before {nn_active_until} s")
+        nn_xlim = (nn_start, nn_end)
+        plotted_nn_intervals = [
+            (max(start, nn_start), min(end, nn_end))
+            for start, end in nn_intervals
+            if end > nn_start and start < nn_end
+        ]
+        nn_active_state_groups = [
+            ("NN raw error", ["nn_in_dx_raw", "nn_in_dy_raw", "nn_in_dz_raw"]),
+            *state_groups[1:],
+        ]
+        position_error_groups = [
+            ("x [m]", ["pos_x", "nn_in_dx_raw"]),
+            ("y [m]", ["pos_y", "nn_in_dy_raw"]),
+            ("z [m]", ["pos_z", "nn_in_dz_raw"]),
+        ]
+        outputs.append((out_dir / f"{path.stem}_state_commands_nn_active.png", nn_active_state_groups, nn_xlim, "state, commands and RPM - NN active"))
+        outputs.append((out_dir / f"{path.stem}_position_vs_error_nn_active.png", position_error_groups, nn_xlim, "position vs NN raw position error - NN active"))
+        outputs.append((out_dir / f"{path.stem}_all_states_nn_active.png", all_state_groups, nn_xlim, "all states - NN active"))
+        outputs.append((out_dir / f"{path.stem}_body_rates_nn_active.png", body_rate_groups, nn_xlim, "body rates p q r - NN active"))
+        outputs.append((out_dir / f"{path.stem}_nn_raw_outputs_nn_active.png", nn_raw_groups, nn_xlim, "NN raw inputs and outputs - NN active"))
+        outputs.append((out_dir / f"{path.stem}_nn_normalized_nn_active.png", nn_norm_groups, nn_xlim, "NN normalized inputs - NN active"))
+    else:
+        outputs.append((out_dir / f"{path.stem}_state_commands_full.png", state_groups, None, "state, commands and RPM - full"))
+        outputs.append((out_dir / f"{path.stem}_all_states_full.png", all_state_groups, None, "all states - full"))
+        outputs.append((out_dir / f"{path.stem}_body_rates_full.png", body_rate_groups, None, "body rates p q r - full"))
+        outputs.append((out_dir / f"{path.stem}_nn_raw_outputs_full.png", nn_raw_groups, None, "NN raw inputs and outputs - full"))
+        outputs.append((out_dir / f"{path.stem}_nn_normalized_full.png", nn_norm_groups, None, "NN normalized inputs - full"))
 
-    zoom_xlim = active_motor_xlim(data, threshold_rpm, pad_s)
-    if zoom_xlim:
-        outputs.append((out_dir / f"{path.stem}_state_commands_active_motors.png", state_groups, zoom_xlim, "state, commands and RPM - active motors"))
+        zoom_xlim = active_motor_xlim(data, threshold_rpm, pad_s)
+        if zoom_xlim:
+            outputs.append((out_dir / f"{path.stem}_state_commands_active_motors.png", state_groups, zoom_xlim, "state, commands and RPM - active motors"))
+            outputs.append((out_dir / f"{path.stem}_all_states_active_motors.png", all_state_groups, zoom_xlim, "all states - active motors"))
+            outputs.append((out_dir / f"{path.stem}_body_rates_active_motors.png", body_rate_groups, zoom_xlim, "body rates p q r - active motors"))
 
     for output_path, groups, xlim, suffix_title in outputs:
-        plot_groups(output_path, f"{path.name} - {suffix_title}", data, groups, nn_intervals, xlim=xlim)
+        plot_groups(output_path, f"{path.name} - {suffix_title}", data, groups, plotted_nn_intervals, xlim=xlim)
 
     html = [
         "<!doctype html><html><head><meta charset=\"utf-8\">",
@@ -193,7 +240,7 @@ def generate(path, output_base, threshold_rpm, pad_s):
         f"<h1>{path.name}</h1>",
         "<p>Orange bands mark NN activity. For old logs without <code>nn_enabled</code>, activity is inferred from "
         "<code>nn_in_*</code>, <code>network_out*</code>, and <code>rpm_cmd*</code> becoming non-zero.</p>",
-        f"<p>NN intervals: {nn_intervals or 'none'}</p>",
+        f"<p>NN intervals shown: {plotted_nn_intervals or 'none'}</p>",
     ]
     for output_path, _groups, _xlim, _title in outputs:
         html.append(f"<h2>{output_path.name}</h2><img src=\"{output_path.name}\">")
@@ -201,7 +248,7 @@ def generate(path, output_base, threshold_rpm, pad_s):
     (out_dir / "index.html").write_text("\n".join(html))
 
     print(f"Saved onboard plots to {out_dir}")
-    print(f"NN intervals: {nn_intervals or 'none'}")
+    print(f"NN intervals shown: {plotted_nn_intervals or 'none'}")
 
 
 def main():
@@ -210,10 +257,19 @@ def main():
     parser.add_argument("--output-dir", type=Path, default=Path("plots") / "plots_onboard")
     parser.add_argument("--active-rpm-threshold", type=float, default=1000.0)
     parser.add_argument("--active-pad-s", type=float, default=2.0)
+    parser.add_argument("--nn-active-only", action="store_true", help="Plot only the interval between NN activation and deactivation")
+    parser.add_argument("--nn-active-until", type=float, help="End an NN-active-only plot at this log time in seconds")
     args = parser.parse_args()
 
     for csv_file in args.csv_files:
-        generate(csv_file, args.output_dir, args.active_rpm_threshold, args.active_pad_s)
+        generate(
+            csv_file,
+            args.output_dir,
+            args.active_rpm_threshold,
+            args.active_pad_s,
+            args.nn_active_only,
+            args.nn_active_until,
+        )
 
 
 if __name__ == "__main__":

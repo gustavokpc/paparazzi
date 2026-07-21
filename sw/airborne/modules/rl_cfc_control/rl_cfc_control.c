@@ -65,6 +65,10 @@
 #define RL_CFC_MAX_RPM 10000.0f
 #endif
 
+#ifndef RL_CFC_TRAIN_HOVER_RPM
+#define RL_CFC_TRAIN_HOVER_RPM 7746.6f
+#endif
+
 #ifndef RL_CFC_REVERSE_YAW_OUTPUT
 #define RL_CFC_REVERSE_YAW_OUTPUT FALSE
 #endif
@@ -87,6 +91,23 @@
 
 #ifndef RL_CFC_NPS_DEFAULT_MAX_THRUST_N
 #define RL_CFC_NPS_DEFAULT_MAX_THRUST_N 2.80f
+#endif
+
+/*
+ * Gazebo/NPS does not provide measured Bebop motor RPM. Model the feedback
+ * used by the policy as a first-order motor response instead of feeding the
+ * previous command straight back into the observation.
+ */
+#ifndef RL_CFC_CONTROL_TIMESPAN_S
+#ifdef CFC_TIMESPAN
+#define RL_CFC_CONTROL_TIMESPAN_S CFC_TIMESPAN
+#else
+#define RL_CFC_CONTROL_TIMESPAN_S 0.01f
+#endif
+#endif
+
+#ifndef RL_CFC_SIM_MOTOR_TAU_S
+#define RL_CFC_SIM_MOTOR_TAU_S 0.06f
 #endif
 
 #ifndef RL_CFC_USE_NED_INPUT
@@ -183,6 +204,14 @@ float rl_cfc_control_dist_to_target = 0.f;
 static uint32_t rl_cfc_control_last_periodic_start_us = 0U;
 static bool rl_cfc_control_has_previous_gate_projection = false;
 static float rl_cfc_control_previous_gate_projection = 0.f;
+#if !RL_CFC_HAS_BEBOP_ACTUATORS
+static float rl_cfc_control_sim_rpm_est[4] = {
+  RL_CFC_TRAIN_HOVER_RPM,
+  RL_CFC_TRAIN_HOVER_RPM,
+  RL_CFC_TRAIN_HOVER_RPM,
+  RL_CFC_TRAIN_HOVER_RPM
+};
+#endif
 
 /*
  * Figure-eight gate centers from the RL environment.
@@ -257,10 +286,10 @@ __attribute__((weak)) void rl_cfc_get_motor_feedback_rpm(float omega_rpm[4])
     omega_rpm[i] = (float)actuators_bebop.rpm_obs[rl_cfc_net_to_phys_motor[i]];
   }
 #else
-  omega_rpm[0] = rl_cfc_control_last_rpm[0];
-  omega_rpm[1] = rl_cfc_control_last_rpm[1];
-  omega_rpm[2] = rl_cfc_control_last_rpm[2];
-  omega_rpm[3] = rl_cfc_control_last_rpm[3];
+  omega_rpm[0] = rl_cfc_control_sim_rpm_est[0];
+  omega_rpm[1] = rl_cfc_control_sim_rpm_est[1];
+  omega_rpm[2] = rl_cfc_control_sim_rpm_est[2];
+  omega_rpm[3] = rl_cfc_control_sim_rpm_est[3];
 #endif
 }
 
@@ -270,6 +299,28 @@ static float clampf(float x, float lo, float hi)
   if (x > hi) return hi;
   return x;
 }
+
+#if !RL_CFC_HAS_BEBOP_ACTUATORS
+static void reset_sim_motor_feedback_rpm(float rpm)
+{
+  rpm = clampf(rpm, RL_CFC_MIN_RPM, RL_CFC_MAX_RPM);
+  for (uint8_t i = 0U; i < 4U; i++) {
+    rl_cfc_control_sim_rpm_est[i] = rpm;
+  }
+}
+
+static void update_sim_motor_feedback_rpm(void)
+{
+  const float dt = RL_CFC_CONTROL_TIMESPAN_S > 0.f ? RL_CFC_CONTROL_TIMESPAN_S : 0.01f;
+  const float tau = RL_CFC_SIM_MOTOR_TAU_S > 0.f ? RL_CFC_SIM_MOTOR_TAU_S : dt;
+  const float alpha = clampf(1.f - expf(-dt / tau), 0.f, 1.f);
+
+  for (uint8_t i = 0U; i < 4U; i++) {
+    const float rpm_target = clampf(rl_cfc_control_last_rpm[i], RL_CFC_MIN_RPM, RL_CFC_MAX_RPM);
+    rl_cfc_control_sim_rpm_est[i] += alpha * (rpm_target - rl_cfc_control_sim_rpm_est[i]);
+  }
+}
+#endif
 
 static float wrap_pi(float x)
 {
@@ -456,7 +507,6 @@ static void update_target_debug(const rl_vec3_t pos, const rl_vec3_t wp)
   rl_cfc_control_error[2] = wp.z - pos.z;
   rl_cfc_control_dist_to_target = sqrtf(waypoint_dist2(pos, wp));
 }
-
 static void update_next_gate_debug(unsigned int waypoint_index)
 {
   const rl_vec3_t current_wp = get_figure_eight_waypoint(waypoint_index);
@@ -531,9 +581,9 @@ static void maybe_advance_waypoint(const rl_vec3_t pos)
       gate_projection > 0.f;
   const bool gate_passed = passed_gate_plane && inside_gate_window(pos, wp);
   const bool reached_center = d2 < reached_radius * reached_radius;
-  if (gate_passed || reached_center) {
+  if (gate_passed) {
     rl_cfc_control_waypoint_index = (rl_cfc_control_waypoint_index + 1U) % rl_num_figure_eight_waypoints;
-    rl_cfc_reset();
+    // rl_cfc_reset();
     rl_cfc_control_has_previous_gate_projection = false;
   }
   const rl_vec3_t active_wp = get_figure_eight_waypoint(rl_cfc_control_waypoint_index);
@@ -566,6 +616,9 @@ void rl_cfc_control_init(void)
     rl_cfc_control_action[i] = 0.f;
     rl_cfc_control_policy_raw_action[i] = 0.f;
   }
+#if !RL_CFC_HAS_BEBOP_ACTUATORS
+  reset_sim_motor_feedback_rpm(RL_CFC_TRAIN_HOVER_RPM);
+#endif
   rl_cfc_control_raw_mean_rpm = 0;
   rl_cfc_control_mean_policy_rpm = 0.f;
   rl_cfc_control_has_previous_gate_projection = false;
@@ -586,19 +639,25 @@ void rl_cfc_control_start(void)
   rl_cfc_control_inference_time_us = 0U;
   rl_cfc_control_total_time_us = 0U;
   rl_cfc_control_last_periodic_start_us = 0U;
+  const float hover_rpm = clampf(RL_CFC_TRAIN_HOVER_RPM, RL_CFC_MIN_RPM, RL_CFC_MAX_RPM);
+  const float hover_norm = (hover_rpm - RL_CFC_MIN_RPM) / (RL_CFC_MAX_RPM - RL_CFC_MIN_RPM);
+  const float hover_action = 2.f * hover_norm - 1.f;
   for (unsigned int i = 0; i < 4U; i++) {
-    rl_cfc_control_last_norm[i] = 0.f;
-    rl_cfc_control_last_rpm[i] = RL_CFC_MIN_RPM;
-    rl_cfc_control_motor_rpm_cmd[i] = rpm_to_command(RL_CFC_MIN_RPM);
-    rl_cfc_control_applied_rpm_cmd[i] = rpm_to_command(RL_CFC_MIN_RPM);
-    rl_cfc_control_feedback_rpm[i] = RL_CFC_MIN_RPM;
-    rl_cfc_control_motor_state[i] = rpm_to_motor_state(RL_CFC_MIN_RPM);
-    rl_cfc_control_policy_raw_action[i] = -1.f;
-    rl_cfc_control_raw_action[i] = -1.f;
-    rl_cfc_control_action[i] = -1.f;
+    rl_cfc_control_last_norm[i] = hover_norm;
+    rl_cfc_control_last_rpm[i] = hover_rpm;
+    rl_cfc_control_motor_rpm_cmd[i] = rpm_to_command(hover_rpm);
+    rl_cfc_control_applied_rpm_cmd[i] = rpm_to_command(hover_rpm);
+    rl_cfc_control_feedback_rpm[i] = hover_rpm;
+    rl_cfc_control_motor_state[i] = rpm_to_motor_state(hover_rpm);
+    rl_cfc_control_policy_raw_action[i] = hover_action;
+    rl_cfc_control_raw_action[i] = hover_action;
+    rl_cfc_control_action[i] = hover_action;
   }
-  rl_cfc_control_raw_mean_rpm = 0;
-  rl_cfc_control_mean_policy_rpm = 0.f;
+#if !RL_CFC_HAS_BEBOP_ACTUATORS
+  reset_sim_motor_feedback_rpm(hover_rpm);
+#endif
+  rl_cfc_control_raw_mean_rpm = rpm_to_command(hover_rpm);
+  rl_cfc_control_mean_policy_rpm = hover_rpm;
   rl_cfc_control_has_previous_gate_projection = false;
   rl_cfc_control_previous_gate_projection = 0.f;
   const rl_vec3_t start_pos = rl_cfc_get_position_m();
@@ -630,6 +689,9 @@ void rl_cfc_control_stop(void)
     rl_cfc_control_raw_action[i] = 0.f;
     rl_cfc_control_action[i] = 0.f;
   }
+#if !RL_CFC_HAS_BEBOP_ACTUATORS
+  reset_sim_motor_feedback_rpm(RL_CFC_TRAIN_HOVER_RPM);
+#endif
   rl_cfc_control_raw_mean_rpm = 0;
   rl_cfc_control_mean_policy_rpm = 0.f;
   rl_cfc_control_has_previous_gate_projection = false;
@@ -736,6 +798,9 @@ void rl_cfc_control_periodic(void)
         rpm_to_command(rl_cfc_control_last_rpm[i]);
     rpm_sum += rl_cfc_control_last_rpm[i];
   }
+#if !RL_CFC_HAS_BEBOP_ACTUATORS
+  update_sim_motor_feedback_rpm();
+#endif
   rl_cfc_control_mean_policy_rpm = rpm_sum * 0.25f;
   update_motor_command_debug();
   rl_cfc_control_total_time_us = get_sys_time_usec() - periodic_start_us;

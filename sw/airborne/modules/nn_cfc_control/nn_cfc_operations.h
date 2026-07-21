@@ -1,7 +1,6 @@
 #ifndef NN_OPERATIONS_H
 #define NN_OPERATIONS_H
 
-#include <math.h>
 #include "nn_cfc_parameters.h"
 
 void nn_reset(void);

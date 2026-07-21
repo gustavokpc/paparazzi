@@ -146,7 +146,7 @@
  * the first-order motor model used in training.
  */
 #ifndef NN_CFC_SIM_MOTOR_TAU_S
-#define NN_CFC_SIM_MOTOR_TAU_S 0.03f
+#define NN_CFC_SIM_MOTOR_TAU_S 0.06f
 #endif
 
 #ifndef NN_CFC_TRAIN_HOVER_RPM

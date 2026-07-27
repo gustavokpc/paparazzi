@@ -37,6 +37,7 @@
 #endif
 
 #include "paparazzi.h"
+#include "autopilot.h"
 #include "state.h"
 #include "generated/airframe.h"
 #include "generated/flight_plan.h"
@@ -100,32 +101,6 @@
 #define NN_CFC_MAX_RPM 10000.0f
 #endif
 
-/* Keep this in C so the NN output convention is not silently overridden by XML. */
-#ifdef NN_CFC_REVERSE_YAW_OUTPUT
-#undef NN_CFC_REVERSE_YAW_OUTPUT
-#endif
-#define NN_CFC_REVERSE_YAW_OUTPUT TRUE
-
-/*
- * NPS/Gazebo conversion used only when this module is compiled without the
- * Bebop actuator driver. Real Bebop/Bebop2 builds keep sending RPM directly.
- */
-#ifndef NN_CFC_TRAIN_CT0
-#define NN_CFC_TRAIN_CT0 1.5608699335679425e-02f
-#endif
-
-#ifndef NN_CFC_TRAIN_RHO
-#define NN_CFC_TRAIN_RHO 1.225f
-#endif
-
-#ifndef NN_CFC_TRAIN_PROP_RADIUS_M
-#define NN_CFC_TRAIN_PROP_RADIUS_M 0.075f
-#endif
-
-#ifndef NN_CFC_NPS_DEFAULT_MAX_THRUST_N
-#define NN_CFC_NPS_DEFAULT_MAX_THRUST_N 2.80f
-#endif
-
 /*
  * Controller call period used by wrapper-side simulation helpers. Some exported
  * recurrent networks define CFC_TIMESPAN because the cell itself needs it; plain
@@ -146,7 +121,11 @@
  * the first-order motor model used in training.
  */
 #ifndef NN_CFC_SIM_MOTOR_TAU_S
+#ifdef NPS_GAZEBO_BEBOP2_MATLAB_MOTOR_TAU_S
+#define NN_CFC_SIM_MOTOR_TAU_S NPS_GAZEBO_BEBOP2_MATLAB_MOTOR_TAU_S
+#else
 #define NN_CFC_SIM_MOTOR_TAU_S 0.06f
+#endif
 #endif
 
 #ifndef NN_CFC_TRAIN_HOVER_RPM
@@ -201,6 +180,12 @@ float nn_cfc_control_net_input_normalized[19] = {0.f};
 float nn_cfc_control_log_values[38] = {0.f};
 static float nn_cfc_control_timing_values[4] = {0.f, 0.f, 0.f, 0.f};
 static uint32_t nn_cfc_control_last_periodic_start_us = 0U;
+
+static bool nn_cfc_control_has_autonomous_authority(void)
+{
+  const uint8_t mode = autopilot_get_mode();
+  return mode == AP_MODE_NAV || mode == AP_MODE_GUIDED;
+}
 #if !NN_CFC_HAS_BEBOP_ACTUATORS
 static float nn_cfc_control_sim_rpm_est[4] = {
   NN_CFC_TRAIN_HOVER_RPM,
@@ -335,24 +320,12 @@ static void update_sim_motor_feedback_rpm(void)
 }
 #endif
 
-static void clamp_state_to_training_range(float state[NUM_STATES])
-{
-  /*
-   * The exported network normalizes each input using input_norm_min/max. Clamp
-   * before inference so a sensor spike does not push the normalized value far
-   * outside the distribution used when exporting/training the model.
-   */
-  for (unsigned int i = 0U; i < NUM_STATES; i++) {
-    state[i] = clampf(state[i], input_norm_min[i], input_norm_max[i]);
-  }
-}
-
-static void normalize_state_for_debug(const float state[NUM_STATES])
+static void normalize_state_for_debug(const float net_state[NUM_STATES])
 {
   /* Mirror the network normalization so telemetry/logs show raw and normalized inputs. */
   for (unsigned int i = 0U; i < NUM_STATES; i++) {
     nn_cfc_control_net_input_normalized[i] =
-        (state[i] - input_norm_min[i]) / (input_norm_max[i] - input_norm_min[i] + 1.0e-10f);
+        (net_state[i] - input_norm_min[i]) / (input_norm_max[i] - input_norm_min[i] + 1.0e-10f);
   }
 }
 
@@ -424,28 +397,6 @@ static int32_t rpm_to_command(float rpm)
   return (int32_t)clampf(rpm, NN_CFC_MIN_RPM, NN_CFC_MAX_RPM);
 }
 
-static void apply_yaw_output_convention(float motor_norm[4])
-{
-#if NN_CFC_REVERSE_YAW_OUTPUT
-  const float fl = motor_norm[0];
-  const float fr = motor_norm[1];
-  const float br = motor_norm[2];
-  const float bl = motor_norm[3];
-
-  const float thrust = 0.25f * (fl + fr + br + bl);
-  const float roll = 0.25f * (fl - fr - br + bl);
-  const float pitch = 0.25f * (fl + fr - br - bl);
-  const float yaw = -0.25f * (-fl + fr - br + bl);
-
-  motor_norm[0] = clampf(thrust + roll + pitch - yaw, 0.f, 1.f);
-  motor_norm[1] = clampf(thrust - roll + pitch + yaw, 0.f, 1.f);
-  motor_norm[2] = clampf(thrust - roll - pitch - yaw, 0.f, 1.f);
-  motor_norm[3] = clampf(thrust + roll - pitch + yaw, 0.f, 1.f);
-#else
-  (void)motor_norm;
-#endif
-}
-
 static void update_motor_command_debug(void)
 {
   /* Mean of calibrated NN RPMs, useful as a quick hover/throttle sanity check. */
@@ -457,43 +408,15 @@ static void update_motor_command_debug(void)
 }
 
 #if !NN_CFC_HAS_BEBOP_ACTUATORS
-static float nps_actuator_max_thrust_n(uint8_t motor_idx)
-{
-#ifdef NPS_ACTUATOR_THRUSTS
-  const float nps_actuator_thrusts[] = NPS_ACTUATOR_THRUSTS;
-  const uint8_t thrusts_nb = sizeof(nps_actuator_thrusts) / sizeof(nps_actuator_thrusts[0]);
-  if (motor_idx < thrusts_nb && nps_actuator_thrusts[motor_idx] > 0.f) {
-    return nps_actuator_thrusts[motor_idx];
-  }
-#else
-  (void)motor_idx;
-#endif
-  return NN_CFC_NPS_DEFAULT_MAX_THRUST_N;
-}
-
-static int32_t rpm_to_nps_pprz_command(uint8_t motor_idx, float rpm)
+static int32_t rpm_to_nps_pprz_command(float rpm)
 {
   /*
-   * RPM -> PPRZ conversion for NPS/Gazebo only.
-   *
-   * The NN output is trained as an absolute RPM reference:
-   *   normalized 0 -> NN_CFC_MIN_RPM, normalized 1 -> NN_CFC_MAX_RPM.
-   * Gazebo's FDM expects a normalized thrust command:
-   *   thrust = NPS_ACTUATOR_THRUSTS[motor] * (PPRZ / MAX_PPRZ).
-   *
-   * Use the same hover/low-advance thrust approximation as the training model:
-   *   thrust = Ct0 * rho * omega^2 * R^2 * area.
+   * While the neural aerodynamic model is active, the NPS actuator channel is
+   * a direct normalized-RPM transport: 0 -> 0 rpm, 1 -> max training RPM.
+   * The stock Gazebo thrust interpretation is used only before NN activation.
    */
-  rpm = clampf(rpm, NN_CFC_MIN_RPM, NN_CFC_MAX_RPM);
-  const float pi = 3.14159265358979323846f;
-  const float omega = rpm * (2.f * pi / 60.f);
-  const float radius = NN_CFC_TRAIN_PROP_RADIUS_M;
-  const float area = pi * radius * radius;
-  const float thrust_n = NN_CFC_TRAIN_CT0 * NN_CFC_TRAIN_RHO *
-                         omega * omega * radius * radius * area;
-  const float max_thrust_n = nps_actuator_max_thrust_n(motor_idx);
-  const float normalized_thrust = thrust_n / max_thrust_n;
-  const float pprz = clampf(normalized_thrust, 0.f, 1.f) * (float)MAX_PPRZ;
+  const float normalized_rpm = clampf(rpm, 0.f, NN_CFC_MAX_RPM) / NN_CFC_MAX_RPM;
+  const float pprz = normalized_rpm * (float)MAX_PPRZ;
   return (int32_t)(pprz + 0.5f);
 }
 #endif
@@ -501,7 +424,7 @@ static int32_t rpm_to_nps_pprz_command(uint8_t motor_idx, float rpm)
 static void apply_motor_rpm(uint8_t motor_idx, int32_t rpm)
 {
 #if !NN_CFC_HAS_BEBOP_ACTUATORS
-  motor_mixing.commands[motor_idx] = rpm_to_nps_pprz_command(motor_idx, (float)rpm);
+  motor_mixing.commands[motor_idx] = rpm_to_nps_pprz_command((float)rpm);
 #else
   /* Real Bebop/Bebop2 path: the actuator driver accepts RPM-like motor references. */
   actuators_bebop_set(motor_idx, (int16_t)rpm);
@@ -629,6 +552,16 @@ void nn_cfc_control_init(void)
 void nn_cfc_control_start(void)
 {
   /*
+   * Neural motor authority is restricted to autonomous NAV/GUIDED modes. A
+   * safety pilot selecting ATT (or any failsafe/manual mode) must always regain
+   * the normal stabilization/mixer path without waiting for the flight plan.
+   */
+  if (!nn_cfc_control_has_autonomous_authority()) {
+    nn_cfc_control_stop();
+    return;
+  }
+
+  /*
    * Start is called by the flight plan. Resetting the recurrent state here is
    * important because the CFC hidden state should not carry stale information
    * from a previous manual/standby segment.
@@ -694,6 +627,11 @@ void nn_cfc_control_periodic(void)
   if (!nn_cfc_control_enabled) {
     return;
   }
+  if (!nn_cfc_control_has_autonomous_authority()) {
+    nn_cfc_control_stop();
+    return;
+  }
+
   const uint32_t periodic_start_us = nn_cfc_timing_now_usec();
   if (nn_cfc_control_last_periodic_start_us != 0U) {
     nn_cfc_control_periodic_dt_us = periodic_start_us - nn_cfc_control_last_periodic_start_us;
@@ -751,7 +689,7 @@ void nn_cfc_control_periodic(void)
    * 3. Assemble the exact 19-value vector expected by nn_cfc_parameters.h.
    *    Changing this order changes the meaning of the NN input.
    */
-  float state[NUM_STATES] = {
+  float net_state[NUM_STATES] = {
     nn_err.x, nn_err.y, nn_err.z,
     nn_vel.x, nn_vel.y, nn_vel.z,
     att.phi, att.theta, att.psi,
@@ -759,25 +697,21 @@ void nn_cfc_control_periodic(void)
     mext.x, mext.y, mext.z,
     omega[0], omega[1], omega[2], omega[3]
   };
-  // clamp_state_to_training_range(state); // Disable to test rob
-
   /* 4. Save raw/normalized inputs before inference for logger_file and telemetry. */
   for (unsigned int i = 0; i < NUM_STATES; i++) {
-    nn_cfc_control_net_input_state[i] = state[i];
+    nn_cfc_control_net_input_state[i] = net_state[i];
   }
-  normalize_state_for_debug(state);
+  normalize_state_for_debug(net_state);
 
   /* 5. Run the exported CFC network. Output is normalized motor command [0,1]. */
   float normalized_cmd[NUM_CONTROLS];
   const uint32_t inference_start_us = nn_cfc_timing_now_usec();
-  NN_NET_CONTROL(state, normalized_cmd);
+  NN_NET_CONTROL(net_state, normalized_cmd);
   nn_cfc_control_inference_time_us = nn_cfc_timing_now_usec() - inference_start_us;
   float network_raw_cmd[NUM_CONTROLS];
   for (unsigned int i = 0; i < NUM_CONTROLS; i++) {
     network_raw_cmd[i] = normalized_cmd[i];
   }
-  apply_yaw_output_convention(normalized_cmd);
-
   /* 6. Convert normalized outputs directly to the trained RPM command range. */
   for (unsigned int i = 0; i < 4U; i++) {
     nn_cfc_control_last_norm[i] = clampf(normalized_cmd[i], 0.f, 1.f);  // already clamped
@@ -819,6 +753,15 @@ void nn_cfc_control_apply_motor_rpm(bool motors_on)
    * - RPM reference on real Bebop/Bebop2 builds;
    * - PPRZ thrust-equivalent command on NPS/Gazebo builds.
    */
+  /*
+   * command_laws run the standard mixer immediately before this function.
+   * On an autonomous -> manual transition, stop NN and leave those mixer
+   * commands intact instead of overwriting them with the last network RPMs.
+   */
+  if (nn_cfc_control_enabled && !nn_cfc_control_has_autonomous_authority()) {
+    nn_cfc_control_stop();
+  }
+
   if (!motors_on || !nn_cfc_control_enabled) {
     for (uint8_t i = 0U; i < 4U; i++) {
       nn_cfc_control_applied_rpm_cmd[i] = 0;

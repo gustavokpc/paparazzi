@@ -6,8 +6,9 @@
  * - This file builds the 20-element raw RL observation expected by
  *   rl_cfc_parameters.h:
  *   pos_G, vel_G, euler_B_to_G, rates_B, motor_state, next_gate_G.
- * - The RL policy returns actions in [-1,1]. The wrapper maps them to
- *   normalized motor commands in [0,1], then to direct Bebop RPM references.
+ * - The RL policy returns normalized motor actions directly in [0,1], matching
+ *   the action space used to train and save the 96,000,000-step checkpoint.
+ *   The wrapper maps them directly to Bebop RPM references.
  * - The airframe command_laws keep the normal autopilot actuator path as a
  *   fallback; rl_cfc_control_apply_motor_rpm() overwrites it only when the RL
  *   controller is enabled.
@@ -17,6 +18,7 @@
 #include "modules/rl_cfc_control/rl_cfc_operations.h"
 
 #include "paparazzi.h"
+#include "autopilot.h"
 #include "state.h"
 #include "generated/airframe.h"
 #include "generated/flight_plan.h"
@@ -39,10 +41,6 @@
 #include <math.h>
 #include <stdbool.h>
 #include <stdint.h>
-
-#ifndef RL_CFC_REACHED_RADIUS_M
-#define RL_CFC_REACHED_RADIUS_M 0.25f
-#endif
 
 #ifndef RL_CFC_GATE_SIZE_M
 #define RL_CFC_GATE_SIZE_M 1.5f
@@ -69,85 +67,50 @@
 #define RL_CFC_TRAIN_HOVER_RPM 7746.6f
 #endif
 
-#ifndef RL_CFC_REVERSE_YAW_OUTPUT
-#define RL_CFC_REVERSE_YAW_OUTPUT FALSE
-#endif
-
-/*
- * NPS/Gazebo conversion used only when this module is compiled without the
- * Bebop actuator driver. Real Bebop/Bebop2 builds keep sending RPM directly.
- */
-#ifndef RL_CFC_TRAIN_CT0
-#define RL_CFC_TRAIN_CT0 1.5608699335679425e-02f
-#endif
-
-#ifndef RL_CFC_TRAIN_RHO
-#define RL_CFC_TRAIN_RHO 1.225f
-#endif
-
-#ifndef RL_CFC_TRAIN_PROP_RADIUS_M
-#define RL_CFC_TRAIN_PROP_RADIUS_M 0.075f
-#endif
-
-#ifndef RL_CFC_NPS_DEFAULT_MAX_THRUST_N
-#define RL_CFC_NPS_DEFAULT_MAX_THRUST_N 2.80f
-#endif
-
-/*
- * Gazebo/NPS does not provide measured Bebop motor RPM. Model the feedback
- * used by the policy as a first-order motor response instead of feeding the
- * previous command straight back into the observation.
- */
-#ifndef RL_CFC_CONTROL_TIMESPAN_S
-#ifdef CFC_TIMESPAN
-#define RL_CFC_CONTROL_TIMESPAN_S CFC_TIMESPAN
-#else
-#define RL_CFC_CONTROL_TIMESPAN_S 0.01f
-#endif
-#endif
-
-#ifndef RL_CFC_SIM_MOTOR_TAU_S
-#define RL_CFC_SIM_MOTOR_TAU_S 0.06f
-#endif
-
-#ifndef RL_CFC_USE_NED_INPUT
-#define RL_CFC_USE_NED_INPUT 1
-#endif
-
-#ifndef RL_CFC_OBS_Z_SIGN
-#define RL_CFC_OBS_Z_SIGN 1.0f
-#endif
-
-#ifndef RL_CFC_OBS_VZ_SIGN
-#define RL_CFC_OBS_VZ_SIGN 1.0f
-#endif
-
-#ifndef RL_CFC_OBS_ROLL_SIGN
-#define RL_CFC_OBS_ROLL_SIGN 1.0f
-#endif
-
-#ifndef RL_CFC_OBS_PITCH_SIGN
-#define RL_CFC_OBS_PITCH_SIGN 1.0f
-#endif
-
-#ifndef RL_CFC_OBS_YAW_SIGN
-#define RL_CFC_OBS_YAW_SIGN 1.0f
-#endif
-
-#ifndef RL_CFC_OBS_P_SIGN
-#define RL_CFC_OBS_P_SIGN 1.0f
-#endif
-
-#ifndef RL_CFC_OBS_Q_SIGN
-#define RL_CFC_OBS_Q_SIGN 1.0f
-#endif
-
-#ifndef RL_CFC_OBS_R_SIGN
-#define RL_CFC_OBS_R_SIGN 1.0f
-#endif
-
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
+#endif
+
+/*
+ * Optional NPS-only observation noise.  The aerodynamic NPS airframe bypasses
+ * AHRS/INS, so the ordinary simulated sensor noise does not reach stateGet*().
+ * Injecting it here makes the values consumed by the policy noisy while
+ * leaving the real AP build and its estimator completely untouched.
+ */
+#if defined(SITL) && defined(NPS_RL_CFC_OBS_RATE_NOISE) && NPS_RL_CFC_OBS_RATE_NOISE
+#if !defined(NPS_RL_CFC_OBS_RATE_NOISE_STD_P) || \
+    !defined(NPS_RL_CFC_OBS_RATE_NOISE_STD_Q) || \
+    !defined(NPS_RL_CFC_OBS_RATE_NOISE_STD_R) || \
+    !defined(NPS_RL_CFC_OBS_NOISE_SEED)
+#error "RL-CfC observation-noise parameters must be defined by the NPS/Gazebo airframe."
+#endif
+
+static uint32_t rl_cfc_obs_noise_state = NPS_RL_CFC_OBS_NOISE_SEED;
+
+static float rl_cfc_obs_noise_uniform(void)
+{
+  rl_cfc_obs_noise_state = 1664525U * rl_cfc_obs_noise_state + 1013904223U;
+  return ((float)((rl_cfc_obs_noise_state >> 8) + 1U)) / 16777217.0f;
+}
+
+static float rl_cfc_obs_noise_gaussian(void)
+{
+  const float u1 = rl_cfc_obs_noise_uniform();
+  const float u2 = rl_cfc_obs_noise_uniform();
+  return sqrtf(-2.0f * logf(u1)) * cosf(2.0f * (float)M_PI * u2);
+}
+
+static void rl_cfc_add_nps_observation_noise(float obs[NUM_STATES])
+{
+  obs[9] += NPS_RL_CFC_OBS_RATE_NOISE_STD_P * rl_cfc_obs_noise_gaussian();
+  obs[10] += NPS_RL_CFC_OBS_RATE_NOISE_STD_Q * rl_cfc_obs_noise_gaussian();
+  obs[11] += NPS_RL_CFC_OBS_RATE_NOISE_STD_R * rl_cfc_obs_noise_gaussian();
+}
+#else
+static void rl_cfc_add_nps_observation_noise(float obs[NUM_STATES])
+{
+  (void)obs;
+}
 #endif
 
 typedef struct {
@@ -174,16 +137,15 @@ uint32_t rl_cfc_control_periodic_dt_us = 0U;
 uint32_t rl_cfc_control_sensor_read_time_us = 0U;
 uint32_t rl_cfc_control_inference_time_us = 0U;
 uint32_t rl_cfc_control_total_time_us = 0U;
-float rl_cfc_control_reached_radius_m = RL_CFC_REACHED_RADIUS_M;
-bool rl_cfc_control_use_ned_input = RL_CFC_USE_NED_INPUT;
+bool rl_cfc_control_use_ned_input = true;
 float rl_cfc_control_target[3] = {0.f, 0.f, 0.f};
 float rl_cfc_control_error[3] = {0.f, 0.f, 0.f};
 float rl_cfc_control_input_error[3] = {0.f, 0.f, 0.f};
 float rl_cfc_control_input_velocity[3] = {0.f, 0.f, 0.f};
 float rl_cfc_control_feedback_rpm[4] = {0.f, 0.f, 0.f, 0.f};
 float rl_cfc_control_motor_state[4] = {0.f, 0.f, 0.f, 0.f};
-float rl_cfc_control_z_sign = RL_CFC_OBS_Z_SIGN;
-float rl_cfc_control_vz_sign = RL_CFC_OBS_VZ_SIGN;
+float rl_cfc_control_z_sign = 1.0f;
+float rl_cfc_control_vz_sign = 1.0f;
 float rl_cfc_control_mean_policy_rpm = 0.f;
 float rl_cfc_control_raw_action[4] = {0.f, 0.f, 0.f, 0.f};
 float rl_cfc_control_action[4] = {0.f, 0.f, 0.f, 0.f};
@@ -202,6 +164,12 @@ float rl_cfc_control_gate_yaw[8] = {
 };
 float rl_cfc_control_dist_to_target = 0.f;
 static uint32_t rl_cfc_control_last_periodic_start_us = 0U;
+
+static bool rl_cfc_control_has_autonomous_authority(void)
+{
+  const uint8_t mode = autopilot_get_mode();
+  return mode == AP_MODE_NAV || mode == AP_MODE_GUIDED;
+}
 static bool rl_cfc_control_has_previous_gate_projection = false;
 static float rl_cfc_control_previous_gate_projection = 0.f;
 #if !RL_CFC_HAS_BEBOP_ACTUATORS
@@ -301,6 +269,11 @@ static float clampf(float x, float lo, float hi)
 }
 
 #if !RL_CFC_HAS_BEBOP_ACTUATORS
+#ifndef NPS_ACTUATOR_TIME_CONSTANTS
+#error "NPS_ACTUATOR_TIME_CONSTANTS must be defined by the NPS/Gazebo airframe."
+#endif
+static const float rl_cfc_sim_motor_tau_s[4] = NPS_ACTUATOR_TIME_CONSTANTS;
+
 static void reset_sim_motor_feedback_rpm(float rpm)
 {
   rpm = clampf(rpm, RL_CFC_MIN_RPM, RL_CFC_MAX_RPM);
@@ -311,11 +284,11 @@ static void reset_sim_motor_feedback_rpm(float rpm)
 
 static void update_sim_motor_feedback_rpm(void)
 {
-  const float dt = RL_CFC_CONTROL_TIMESPAN_S > 0.f ? RL_CFC_CONTROL_TIMESPAN_S : 0.01f;
-  const float tau = RL_CFC_SIM_MOTOR_TAU_S > 0.f ? RL_CFC_SIM_MOTOR_TAU_S : dt;
-  const float alpha = clampf(1.f - expf(-dt / tau), 0.f, 1.f);
+  const float dt = CFC_TIMESPAN;
 
   for (uint8_t i = 0U; i < 4U; i++) {
+    const float tau = rl_cfc_sim_motor_tau_s[i] > 0.f ? rl_cfc_sim_motor_tau_s[i] : dt;
+    const float alpha = clampf(1.f - expf(-dt / tau), 0.f, 1.f);
     const float rpm_target = clampf(rl_cfc_control_last_rpm[i], RL_CFC_MIN_RPM, RL_CFC_MAX_RPM);
     rl_cfc_control_sim_rpm_est[i] += alpha * (rpm_target - rl_cfc_control_sim_rpm_est[i]);
   }
@@ -346,38 +319,6 @@ static rl_vec3_t gate_frame_vec(const rl_vec3_t vec, float gate_yaw)
   return (rl_vec3_t){vec.x * c + vec.y * s, -vec.x * s + vec.y * c, vec.z};
 }
 
-static float action_to_norm(float action)
-{
-  return 0.5f * (clampf(action, -1.f, 1.f) + 1.f);
-}
-
-static void apply_yaw_output_convention(float motor_norm[4])
-{
-#if RL_CFC_REVERSE_YAW_OUTPUT
-  /*
-   * Bebop2 uses MOTOR_MIXING_REVERSE=TRUE in the normal mixer, but this module
-   * bypasses the mixer and writes RPM directly. Flip only the yaw component of
-   * the policy's QUAD_X motor vector, preserving thrust/roll/pitch.
-   */
-  const float fl = motor_norm[0];
-  const float fr = motor_norm[1];
-  const float br = motor_norm[2];
-  const float bl = motor_norm[3];
-
-  const float thrust = 0.25f * (fl + fr + br + bl);
-  const float roll = 0.25f * (fl - fr - br + bl);
-  const float pitch = 0.25f * (fl + fr - br - bl);
-  const float yaw = 0.25f * (-fl + fr - br + bl);
-
-  motor_norm[0] = clampf(thrust + roll + pitch + yaw, 0.f, 1.f);
-  motor_norm[1] = clampf(thrust - roll + pitch - yaw, 0.f, 1.f);
-  motor_norm[2] = clampf(thrust - roll - pitch + yaw, 0.f, 1.f);
-  motor_norm[3] = clampf(thrust + roll - pitch - yaw, 0.f, 1.f);
-#else
-  (void)motor_norm;
-#endif
-}
-
 static rl_vec3_t enu_to_ned_vec(const rl_vec3_t enu)
 {
   return (rl_vec3_t){enu.y, enu.x, -enu.z};
@@ -399,36 +340,15 @@ static void update_motor_command_debug(void)
 }
 
 #if !RL_CFC_HAS_BEBOP_ACTUATORS
-static float nps_actuator_max_thrust_n(uint8_t motor_idx)
-{
-#ifdef NPS_ACTUATOR_THRUSTS
-  const float nps_actuator_thrusts[] = NPS_ACTUATOR_THRUSTS;
-  const uint8_t thrusts_nb = sizeof(nps_actuator_thrusts) / sizeof(nps_actuator_thrusts[0]);
-  if (motor_idx < thrusts_nb && nps_actuator_thrusts[motor_idx] > 0.f) {
-    return nps_actuator_thrusts[motor_idx];
-  }
-#else
-  (void)motor_idx;
-#endif
-  return RL_CFC_NPS_DEFAULT_MAX_THRUST_N;
-}
-
-static int32_t rpm_to_nps_pprz_command(uint8_t motor_idx, float rpm)
+static int32_t rpm_to_nps_pprz_command(float rpm)
 {
   /*
-   * RPM -> PPRZ conversion for NPS/Gazebo only, matching nn_cfc_control.
-   * Real Bebop/Bebop2 builds bypass this and send RPM directly to the BLDC driver.
+   * While the neural aerodynamic model is active, the NPS actuator channel is
+   * a direct normalized-RPM transport: 0 -> 0 rpm, 1 -> max training RPM.
+   * The stock Gazebo thrust interpretation is used only before RL activation.
    */
-  rpm = clampf(rpm, RL_CFC_MIN_RPM, RL_CFC_MAX_RPM);
-  const float pi = 3.14159265358979323846f;
-  const float omega = rpm * (2.f * pi / 60.f);
-  const float radius = RL_CFC_TRAIN_PROP_RADIUS_M;
-  const float area = pi * radius * radius;
-  const float thrust_n = RL_CFC_TRAIN_CT0 * RL_CFC_TRAIN_RHO *
-                         omega * omega * radius * radius * area;
-  const float max_thrust_n = nps_actuator_max_thrust_n(motor_idx);
-  const float normalized_thrust = thrust_n / max_thrust_n;
-  const float pprz = clampf(normalized_thrust, 0.f, 1.f) * (float)MAX_PPRZ;
+  const float normalized_rpm = clampf(rpm, 0.f, RL_CFC_MAX_RPM) / RL_CFC_MAX_RPM;
+  const float pprz = normalized_rpm * (float)MAX_PPRZ;
   return (int32_t)(pprz + 0.5f);
 }
 #endif
@@ -437,7 +357,7 @@ static void apply_motor_rpm(uint8_t motor_idx, int32_t rpm)
 {
 #if !RL_CFC_HAS_BEBOP_ACTUATORS
   if (motor_idx < MOTOR_MIXING_NB_MOTOR) {
-    motor_mixing.commands[motor_idx] = rpm_to_nps_pprz_command(motor_idx, (float)rpm);
+    motor_mixing.commands[motor_idx] = rpm_to_nps_pprz_command((float)rpm);
   }
 #else
   actuators_bebop_set(motor_idx, (int16_t)rpm);
@@ -452,12 +372,14 @@ static float waypoint_dist2(const rl_vec3_t pos, const rl_vec3_t wp)
   return dx * dx + dy * dy + dz * dz;
 }
 
+#if RL_CFC_START_WAYPOINT_INDEX < 0
 static float waypoint_xy_dist2(const rl_vec3_t a, const rl_vec3_t b)
 {
   const float dx = a.x - b.x;
   const float dy = a.y - b.y;
   return dx * dx + dy * dy;
 }
+#endif
 
 static unsigned int choose_initial_waypoint(const rl_vec3_t pos)
 {
@@ -573,14 +495,11 @@ static void maybe_advance_waypoint(const rl_vec3_t pos)
   const rl_vec3_t wp = get_figure_eight_waypoint(rl_cfc_control_waypoint_index);
   const float gate_yaw = rl_cfc_control_gate_yaw[rl_cfc_control_waypoint_index % rl_num_figure_eight_waypoints];
   const float gate_projection = gate_plane_projection(pos, wp, gate_yaw);
-  const float d2 = waypoint_dist2(pos, wp);
-  const float reached_radius = rl_cfc_control_reached_radius_m > 0.f ? rl_cfc_control_reached_radius_m : 0.05f;
   const bool passed_gate_plane =
       rl_cfc_control_has_previous_gate_projection &&
       rl_cfc_control_previous_gate_projection < 0.f &&
       gate_projection > 0.f;
   const bool gate_passed = passed_gate_plane && inside_gate_window(pos, wp);
-  const bool reached_center = d2 < reached_radius * reached_radius;
   if (gate_passed) {
     rl_cfc_control_waypoint_index = (rl_cfc_control_waypoint_index + 1U) % rl_num_figure_eight_waypoints;
     // rl_cfc_reset();
@@ -632,6 +551,16 @@ void rl_cfc_control_init(void)
 
 void rl_cfc_control_start(void)
 {
+  /*
+   * Neural motor authority is restricted to autonomous NAV/GUIDED modes. A
+   * safety pilot selecting ATT (or any failsafe/manual mode) must always regain
+   * the normal stabilization/mixer path without waiting for the flight plan.
+   */
+  if (!rl_cfc_control_has_autonomous_authority()) {
+    rl_cfc_control_stop();
+    return;
+  }
+
   rl_cfc_control_enabled = true;
   rl_cfc_control_periodic_count = 0U;
   rl_cfc_control_periodic_dt_us = 0U;
@@ -641,7 +570,7 @@ void rl_cfc_control_start(void)
   rl_cfc_control_last_periodic_start_us = 0U;
   const float hover_rpm = clampf(RL_CFC_TRAIN_HOVER_RPM, RL_CFC_MIN_RPM, RL_CFC_MAX_RPM);
   const float hover_norm = (hover_rpm - RL_CFC_MIN_RPM) / (RL_CFC_MAX_RPM - RL_CFC_MIN_RPM);
-  const float hover_action = 2.f * hover_norm - 1.f;
+  const float hover_action = hover_norm;
   for (unsigned int i = 0; i < 4U; i++) {
     rl_cfc_control_last_norm[i] = hover_norm;
     rl_cfc_control_last_rpm[i] = hover_rpm;
@@ -705,6 +634,11 @@ void rl_cfc_control_periodic(void)
   if (!rl_cfc_control_enabled) {
     return;
   }
+  if (!rl_cfc_control_has_autonomous_authority()) {
+    rl_cfc_control_stop();
+    return;
+  }
+
   const uint32_t periodic_start_us = get_sys_time_usec();
   if (rl_cfc_control_last_periodic_start_us != 0U) {
     rl_cfc_control_periodic_dt_us = periodic_start_us - rl_cfc_control_last_periodic_start_us;
@@ -755,12 +689,12 @@ void rl_cfc_control_periodic(void)
   float obs[NUM_STATES] = {
     pos_gate.x, pos_gate.y, pos_gate.z,
     vel_gate.x, vel_gate.y, vel_gate.z,
-    RL_CFC_OBS_ROLL_SIGN * att.phi,
-    RL_CFC_OBS_PITCH_SIGN * att.theta,
-    RL_CFC_OBS_YAW_SIGN * wrap_pi(att.psi - gate_yaw),
-    RL_CFC_OBS_P_SIGN * rates.x,
-    RL_CFC_OBS_Q_SIGN * rates.y,
-    RL_CFC_OBS_R_SIGN * rates.z,
+    att.phi,
+    att.theta,
+    wrap_pi(att.psi - gate_yaw),
+    rates.x,
+    rates.y,
+    rates.z,
     rl_cfc_control_motor_state[0],
     rl_cfc_control_motor_state[1],
     rl_cfc_control_motor_state[2],
@@ -770,6 +704,7 @@ void rl_cfc_control_periodic(void)
     rl_cfc_control_next_gate[2],
     rl_cfc_control_next_gate[3]
   };
+  rl_cfc_add_nps_observation_noise(obs);
   for (unsigned int i = 0; i < NUM_STATES; i++) {
     rl_cfc_control_obs[i] = obs[i];
   }
@@ -783,11 +718,9 @@ void rl_cfc_control_periodic(void)
   for (unsigned int i = 0; i < 4U; i++) {
     rl_cfc_control_policy_raw_action[i] = action[i];
     rl_cfc_control_raw_action[i] = rl_cfc_last_raw_control[i];
-    rl_cfc_control_action[i] = clampf(action[i], -1.f, 1.f);
-    normalized_cmd[i] = action_to_norm(rl_cfc_control_action[i]);
+    rl_cfc_control_action[i] = clampf(action[i], 0.f, 1.f);
+    normalized_cmd[i] = rl_cfc_control_action[i];
   }
-  apply_yaw_output_convention(normalized_cmd);
-
   float rpm_sum = 0.f;
   for (unsigned int i = 0; i < 4U; i++) {
     rl_cfc_control_last_norm[i] = clampf(normalized_cmd[i], 0.f, 1.f);
@@ -808,6 +741,15 @@ void rl_cfc_control_periodic(void)
 
 void rl_cfc_control_apply_motor_rpm(bool motors_on)
 {
+  /*
+   * command_laws run the standard mixer immediately before this function.
+   * On an autonomous -> manual transition, stop RL and leave those mixer
+   * commands intact instead of overwriting them with the last network RPMs.
+   */
+  if (rl_cfc_control_enabled && !rl_cfc_control_has_autonomous_authority()) {
+    rl_cfc_control_stop();
+  }
+
   if (!motors_on || !rl_cfc_control_enabled) {
     for (uint8_t i = 0U; i < 4U; i++) {
       rl_cfc_control_applied_rpm_cmd[i] = 0;

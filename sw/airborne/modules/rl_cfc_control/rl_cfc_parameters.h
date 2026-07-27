@@ -1,34 +1,28 @@
 #ifndef RL_CFC_PARAMETERS_H
 #define RL_CFC_PARAMETERS_H
 
-/* File: rl_cfc_parameters.h
- * Generated from: recurrent_ppo_figure8_gates.zip
+/* Exact deterministic actor export from:
+ * recurrent_ppo_figure8_gates_ckpt_96000000_steps.zip
+ * configured for a 100 Hz controller (CfC timespan = 0.01 s).
  */
 #define NUM_STATES 20
 #define NUM_CONTROLS 4
 #define CFC_INPUT_DIM 20
 #define HIDDEN_SIZE 64
+#define CFC_BACKBONE_DIM 128
 #define POLICY_HIDDEN_DIM 64
 #define CFC_TIMESPAN 0.01f
-#define LTC_ODE_UNFOLDS 6
 
-extern const float LTC_GLEAK[64];
-extern const float LTC_VLEAK[64];
-extern const float LTC_CM[64];
-extern const float LTC_SIGMA[4096];
-extern const float LTC_MU[4096];
-extern const float LTC_W[4096];
-extern const float LTC_EREV[4096];
-extern const float LTC_SENSORY_SIGMA[1280];
-extern const float LTC_SENSORY_MU[1280];
-extern const float LTC_SENSORY_W[1280];
-extern const float LTC_SENSORY_EREV[1280];
-extern const float LTC_SPARSITY_MASK[4096];
-extern const float LTC_SENSORY_SPARSITY_MASK[1280];
-extern const float LTC_INPUT_W[20];
-extern const float LTC_INPUT_B[20];
-extern const float LTC_OUTPUT_W[64];
-extern const float LTC_OUTPUT_B[64];
+extern const float CFC_BACKBONE0_WEIGHT[10752];
+extern const float CFC_BACKBONE0_BIAS[128];
+extern const float CFC_FF1_WEIGHT[8192];
+extern const float CFC_FF1_BIAS[64];
+extern const float CFC_FF2_WEIGHT[8192];
+extern const float CFC_FF2_BIAS[64];
+extern const float CFC_TIME_A_WEIGHT[8192];
+extern const float CFC_TIME_A_BIAS[64];
+extern const float CFC_TIME_B_WEIGHT[8192];
+extern const float CFC_TIME_B_BIAS[64];
 extern const float POLICY0_WEIGHT[4096];
 extern const float POLICY0_BIAS[64];
 extern const float POLICY2_WEIGHT[4096];

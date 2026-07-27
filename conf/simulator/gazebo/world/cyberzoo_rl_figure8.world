@@ -1,0 +1,71 @@
+<?xml version="1.0"?>
+<sdf version="1.6">
+  <world name="cyberzoo_rl_figure8">
+    <physics type="ode">
+      <max_step_size>0.001</max_step_size>
+      <real_time_update_rate>0</real_time_update_rate>
+    </physics>
+
+    <scene>
+      <ambient>0.9 0.9 0.9 1</ambient>
+      <background>0.7 0.7 0.7 1</background>
+      <origin_visual>false</origin_visual>
+      <shadows>false</shadows>
+    </scene>
+
+    <spherical_coordinates>
+      <surface_model>EARTH_WGS84</surface_model>
+      <latitude_deg>51.9906361</latitude_deg>
+      <longitude_deg>4.3767874</longitude_deg>
+      <elevation>45.110</elevation>
+      <heading_deg>180</heading_deg>
+    </spherical_coordinates>
+
+    <include>
+      <uri>model://ground_plane</uri>
+      <pose>0 0 -0.02 0 0 0.454</pose>
+    </include>
+    <include>
+      <uri>model://cyberzoo</uri>
+      <pose>0 0 0 0 0 0.454</pose>
+    </include>
+
+    <!-- ENU centers converted from the policy's [x, y, z_down] coordinates. -->
+    <include>
+      <uri>model://rl_figure8_gate</uri>
+      <name>rl_f8_gate_1</name>
+      <pose>-1.5 1.5 1.5 0 0 -1.570796327</pose>
+    </include>
+    <!-- Policy gates 2 and 6 are the same physical central gate. -->
+    <include>
+      <uri>model://rl_figure8_gate</uri>
+      <name>rl_f8_gate_2_6</name>
+      <pose>0 0 1.5 0 0 0</pose>
+    </include>
+    <include>
+      <uri>model://rl_figure8_gate</uri>
+      <name>rl_f8_gate_3</name>
+      <pose>1.5 -1.5 1.5 0 0 -1.570796327</pose>
+    </include>
+    <include>
+      <uri>model://rl_figure8_gate</uri>
+      <name>rl_f8_gate_4</name>
+      <pose>3.0 0 1.5 0 0 0</pose>
+    </include>
+    <include>
+      <uri>model://rl_figure8_gate</uri>
+      <name>rl_f8_gate_5</name>
+      <pose>1.5 1.5 1.5 0 0 1.570796327</pose>
+    </include>
+    <include>
+      <uri>model://rl_figure8_gate</uri>
+      <name>rl_f8_gate_7</name>
+      <pose>-1.5 -1.5 1.5 0 0 1.570796327</pose>
+    </include>
+    <include>
+      <uri>model://rl_figure8_gate</uri>
+      <name>rl_f8_gate_8</name>
+      <pose>-3.0 0 1.5 0 0 0</pose>
+    </include>
+  </world>
+</sdf>

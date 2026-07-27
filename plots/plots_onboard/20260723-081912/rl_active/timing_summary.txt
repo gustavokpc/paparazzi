@@ -1,0 +1,6 @@
+effective_frequency_hz=102.383528
+active_duration_s=635.160766
+rl_periodic_dt_us: n=64997 mean=9767.139 median=9766.000 p95=9778.000 p99=9809.000 max=13662.000
+rl_sensor_read_time_us: n=64998 mean=16.598 median=16.000 p95=19.000 p99=20.000 max=474.000
+rl_inference_time_us: n=64998 mean=1640.491 median=1636.000 p95=1738.000 p99=1860.030 max=4737.000
+rl_total_time_us: n=64998 mean=1664.699 median=1660.000 p95=1763.000 p99=1888.030 max=4763.000

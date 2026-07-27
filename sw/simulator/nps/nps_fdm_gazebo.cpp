@@ -47,6 +47,11 @@ extern "C" {
 #include "nps_autopilot.h"
 
 #include "generated/airframe.h"
+#if defined(NPS_GAZEBO_BEBOP2_CFC_MODEL)
+#define NPS_GAZEBO_BEBOP2_MATLAB_AERO 1
+extern bool rl_cfc_control_enabled __attribute__((weak));
+extern bool nn_cfc_control_enabled __attribute__((weak));
+#endif
 #include "generated/flight_plan.h"
 #include "autopilot.h"
 #include "modules/core/abi.h"
@@ -62,6 +67,11 @@ extern "C" {
 #include "math/pprz_geodetic_double.h"
 #include "state.h"
 }
+
+/* The opt-in macro comes from generated/airframe.h above. */
+#ifdef NPS_GAZEBO_BEBOP2_MATLAB_AERO
+#include "bebop2_matlab_aero.h"
+#endif
 
 #if defined(NPS_DEBUG_VIDEO)
 // Opencv tools
@@ -149,6 +159,26 @@ static void init_gazebo(void);
 static void gazebo_read(void);
 static void gazebo_write(double act_commands[], int commands_nb);
 
+#ifdef NPS_GAZEBO_BEBOP2_MATLAB_AERO
+static double matlab_aero_dt = 0.0;
+static std::array<double, 4> matlab_aero_rpm = {{0.0, 0.0, 0.0, 0.0}};
+static bool matlab_aero_was_enabled = false;
+static void gazebo_write_bebop2_matlab_aero(double act_commands[], int commands_nb);
+
+static bool matlab_aero_controller_enabled(void)
+{
+#if defined(NPS_GAZEBO_BEBOP2_CFC_MODEL)
+  const bool rl_enabled =
+      &rl_cfc_control_enabled != nullptr && rl_cfc_control_enabled;
+  const bool nn_enabled =
+      &nn_cfc_control_enabled != nullptr && nn_cfc_control_enabled;
+  return rl_enabled || nn_enabled;
+#else
+  return false;
+#endif
+}
+#endif
+
 // Conversion routines
 inline struct EcefCoor_d to_pprz_ecef(ignition::math::Vector3d ecef_i)
 {
@@ -233,6 +263,13 @@ void nps_fdm_init(double dt)
   fdm.init_dt = dt; // JSBsim specific
   fdm.curr_dt = dt; // JSBsim specific
   fdm.nan_count = 0; // JSBsim specific
+
+#ifdef NPS_GAZEBO_BEBOP2_MATLAB_AERO
+  matlab_aero_dt = dt;
+  matlab_aero_rpm.fill(0.0);
+  matlab_aero_was_enabled = false;
+  cout << "NPS: Bebop2 Matlab aerodynamic model available; stock model used until neural-controller activation" << endl;
+#endif
 
 #ifdef NPS_ACTUATOR_TIME_CONSTANTS
   // Set up low-pass filter to simulate delayed actuator response
@@ -650,6 +687,21 @@ static void gazebo_read(void)
  */
 static void gazebo_write(double act_commands[], int commands_nb)
 {
+#ifdef NPS_GAZEBO_BEBOP2_MATLAB_AERO
+  if (matlab_aero_controller_enabled()) {
+    if (!matlab_aero_was_enabled) {
+      cout << "NPS: Bebop2 Matlab aerodynamic model ACTIVE (neural controller enabled)" << endl;
+    }
+    gazebo_write_bebop2_matlab_aero(act_commands, commands_nb);
+    matlab_aero_was_enabled = true;
+    return;
+  }
+  if (matlab_aero_was_enabled) {
+    cout << "NPS: Bebop2 stock Gazebo model ACTIVE (neural controller disabled)" << endl;
+    matlab_aero_was_enabled = false;
+  }
+#endif
+
   for (int i = 0; i < commands_nb; ++i) {
     // Thrust setpoint
     double sp = autopilot.motors_on ? act_commands[i] : 0.0;  // Normalized thrust setpoint
@@ -663,7 +715,6 @@ static void gazebo_write(double act_commands[], int commands_nb)
 #endif
     double thrust = gazebo_actuators.thrusts[i] * u;
     double torque = gazebo_actuators.torques[i] * u;
-
 #ifdef NPS_ACTUATOR_MAX_ANGULAR_MOMENTUM
     // Spinup torque
     double udot = update_first_order_high_pass(&gazebo_actuators.highpass[i], sp);
@@ -676,7 +727,89 @@ static void gazebo_write(double act_commands[], int commands_nb)
     link->AddRelativeForce(ignition::math::Vector3d(0, 0, thrust));
     link->AddRelativeTorque(ignition::math::Vector3d(0, 0, torque));
   }
+
+#ifdef NPS_GAZEBO_HORIZONTAL_DRAG_N_PER_MPS
+  /*
+   * Optional world-horizontal aerodynamic drag for models whose training
+   * dynamics include translational rotor/body drag.  Applying a force here,
+   * instead of SDF velocity_decay, keeps the units independent of the Gazebo
+   * physics step and deliberately leaves vertical takeoff dynamics unchanged.
+   */
+  gazebo::physics::LinkPtr chassis = model->GetLink("chassis");
+  if (chassis) {
+    const ignition::math::Vector3d velocity = model->WorldLinearVel();
+    const double drag_coeff = NPS_GAZEBO_HORIZONTAL_DRAG_N_PER_MPS;
+    chassis->AddForce(ignition::math::Vector3d(
+      -drag_coeff * velocity.X(),
+      -drag_coeff * velocity.Y(),
+      0.0));
+  }
+#endif
 }
+
+#ifdef NPS_GAZEBO_BEBOP2_MATLAB_AERO
+#ifndef NPS_GAZEBO_BEBOP2_MATLAB_ROTOR_YAW_SIGN
+#error "NPS_GAZEBO_BEBOP2_MATLAB_ROTOR_YAW_SIGN must be defined by the NPS/Gazebo airframe."
+#endif
+#ifndef NPS_ACTUATOR_TIME_CONSTANTS
+#error "NPS_ACTUATOR_TIME_CONSTANTS must be defined by the NPS/Gazebo airframe."
+#endif
+/**
+ * Apply the full force/moment model used by quadrotor_sim_matlab.py.
+ *
+ * While a neural controller is active, its NPS actuator command directly
+ * encodes RPM / 10000. Gazebo remains responsible for rigid-body integration,
+ * gravity, contacts and sensors.
+ */
+static void gazebo_write_bebop2_matlab_aero(double act_commands[], int commands_nb)
+{
+  using bebop2_matlab_aero::Vec3;
+
+  gazebo::physics::LinkPtr chassis = model->GetLink("chassis");
+  if (!chassis) {
+    return;
+  }
+
+  const int motor_count = std::min(commands_nb, 4);
+  const double motor_tau_s[4] = NPS_ACTUATOR_TIME_CONSTANTS;
+  for (int i = 0; i < 4; ++i) {
+    double target_rpm = 0.0;
+    if (i < motor_count && autopilot.motors_on) {
+      const double normalized = std::max(0.0, std::min(1.0, act_commands[i]));
+      target_rpm = 10000.0 * normalized;
+    }
+    if (matlab_aero_was_enabled) {
+      matlab_aero_rpm[i] = bebop2_matlab_aero::first_order_step(
+        matlab_aero_rpm[i], target_rpm,
+        motor_tau_s[i], matlab_aero_dt);
+    } else {
+      /* Match the already-spinning stock plant at the controller handover. */
+      matlab_aero_rpm[i] = target_rpm;
+    }
+  }
+
+  const ignition::math::Vector3d velocity_gazebo = chassis->RelativeLinearVel();
+  const ignition::math::Vector3d rates_gazebo = chassis->RelativeAngularVel();
+
+  /* Gazebo body -> Python/Paparazzi body: x, -y, -z. */
+  const Vec3 velocity_body = {
+    velocity_gazebo.X(), -velocity_gazebo.Y(), -velocity_gazebo.Z()
+  };
+  const Vec3 rates_body = {
+    rates_gazebo.X(), -rates_gazebo.Y(), -rates_gazebo.Z()
+  };
+  const bebop2_matlab_aero::Wrench wrench =
+      bebop2_matlab_aero::forces_moments(
+        velocity_body, rates_body, matlab_aero_rpm,
+        NPS_GAZEBO_BEBOP2_MATLAB_ROTOR_YAW_SIGN);
+
+  /* Python/Paparazzi body -> Gazebo body: x, -y, -z. */
+  chassis->AddRelativeForce(ignition::math::Vector3d(
+      wrench.force.x, -wrench.force.y, -wrench.force.z));
+  chassis->AddRelativeTorque(ignition::math::Vector3d(
+      wrench.moment.x, -wrench.moment.y, -wrench.moment.z));
+}
+#endif
 
 #if NPS_SIMULATE_VIDEO
 /**

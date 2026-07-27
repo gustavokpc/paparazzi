@@ -1,0 +1,3 @@
+effective_frequency_hz=102.354131
+active_duration_s=7.044171
+rl_periodic_dt_us: n=720 mean=9770.000 median=9770.000 p95=9770.000 p99=9770.000 max=9770.000

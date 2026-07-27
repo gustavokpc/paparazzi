@@ -62,7 +62,24 @@ paparazzi.sublime-workspace
 # Rust
 Cargo.lock
 
-/var
+# Keep generated build/runtime data ignored, but allow experiment artifacts.
+/var/*
+!/var/log/
+!/var/logs/
+
+# Controller and Gazebo logs: keep only CSV files trackable.
+/var/log/**
+!/var/log/*/
+!/var/log/*/*.csv
+
+# Logs recorded during onboard/real flights: keep only CSV files trackable.
+/var/logs/**
+!/var/logs/log_onboard/
+!/var/logs/log_onboard/*.csv
+
+# Analysis plots are intentionally versionable.
+!/plots/
+!/plots/**
 /dox
 
 # /conf/

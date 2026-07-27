@@ -1,0 +1,49 @@
+<?xml version="1.0"?>
+<sdf version="1.6">
+  <model name="rl_figure8_gate">
+    <static>true</static>
+    <!--
+      The clear opening is exactly 1.50 m x 1.50 m.  There are deliberately
+      no collision elements: these frames are markers and do not change the
+      vehicle dynamics when a gate is missed.
+    -->
+    <link name="frame">
+      <visual name="left_post">
+        <pose>-0.79 0 0 0 0 0</pose>
+        <geometry><box><size>0.08 0.08 1.66</size></box></geometry>
+        <material>
+          <ambient>1.0 0.25 0.02 1</ambient>
+          <diffuse>1.0 0.25 0.02 1</diffuse>
+          <emissive>0.25 0.04 0.0 1</emissive>
+        </material>
+      </visual>
+      <visual name="right_post">
+        <pose>0.79 0 0 0 0 0</pose>
+        <geometry><box><size>0.08 0.08 1.66</size></box></geometry>
+        <material>
+          <ambient>1.0 0.25 0.02 1</ambient>
+          <diffuse>1.0 0.25 0.02 1</diffuse>
+          <emissive>0.25 0.04 0.0 1</emissive>
+        </material>
+      </visual>
+      <visual name="top_bar">
+        <pose>0 0 0.79 0 0 0</pose>
+        <geometry><box><size>1.66 0.08 0.08</size></box></geometry>
+        <material>
+          <ambient>1.0 0.25 0.02 1</ambient>
+          <diffuse>1.0 0.25 0.02 1</diffuse>
+          <emissive>0.25 0.04 0.0 1</emissive>
+        </material>
+      </visual>
+      <visual name="bottom_bar">
+        <pose>0 0 -0.79 0 0 0</pose>
+        <geometry><box><size>1.66 0.08 0.08</size></box></geometry>
+        <material>
+          <ambient>1.0 0.25 0.02 1</ambient>
+          <diffuse>1.0 0.25 0.02 1</diffuse>
+          <emissive>0.25 0.04 0.0 1</emissive>
+        </material>
+      </visual>
+    </link>
+  </model>
+</sdf>

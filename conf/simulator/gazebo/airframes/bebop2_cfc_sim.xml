@@ -1,0 +1,30 @@
+<!DOCTYPE airframe SYSTEM "../../../airframes/airframe.dtd">
+
+<airframe>
+  <!-- Shared simulation-only configuration for the RL-CfC and NN-CfC Bebop2. -->
+  <section name="SIMULATOR" prefix="NPS_">
+    <!-- Select the custom Bebop2 aerodynamic model in NPS/Gazebo. -->
+    <define name="GAZEBO_BEBOP2_CFC_MODEL" value="1"/>
+
+    <define name="ACTUATOR_NAMES" value="nw_motor, ne_motor, se_motor, sw_motor" type="string[]"/>
+    <define name="SENSORS_PARAMS" value="nps_sensors_params_noisy.h" type="string"/>
+    <define name="ACTUATOR_THRUSTS" value="2.80, 2.80, 2.80, 2.80" type="float[]"/>
+    <define name="ACTUATOR_TORQUES" value="0.05, 0.05, 0.05, 0.05" type="float[]"/>
+    <define name="ACTUATOR_TIME_CONSTANTS" value="0.04, 0.04, 0.04, 0.04" type="float[]"/>
+    <define name="ACTUATOR_MAX_ANGULAR_MOMENTUM" value="0.5, 0.5, 0.5, 0.5" type="float[]"/>
+
+    <!-- The only yaw inversion: physical rotor reaction-torque sign. -->
+    <define name="GAZEBO_BEBOP2_MATLAB_ROTOR_YAW_SIGN" value="-1.0"/>
+
+    <!-- RL observation noise. The NN module does not consume these definitions. -->
+    <define name="RL_CFC_OBS_RATE_NOISE" value="1"/>
+    <define name="RL_CFC_OBS_RATE_NOISE_STD_P" value="0.0"/>
+    <define name="RL_CFC_OBS_RATE_NOISE_STD_Q" value="0.0"/>
+    <define name="RL_CFC_OBS_RATE_NOISE_STD_R" value="0.0"/>
+    <define name="RL_CFC_OBS_NOISE_SEED" value="83200001"/>
+
+    <define name="GAZEBO_AC_NAME" value="bebop2_rl_aero" type="string"/>
+    <define name="BYPASS_AHRS" value="1"/>
+    <define name="BYPASS_INS" value="1"/>
+  </section>
+</airframe>

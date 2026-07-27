@@ -7,7 +7,7 @@
     #include "modules/energy/electrical.h"
     #include "modules/radio_control/radio_control.h"
     #include "modules/ahrs/ahrs.h"
-    #define NPS_GAZEBO_WORLD "cyberzoo.world"
+    #define NPS_GAZEBO_WORLD "cyberzoo_rl_figure8.world"
     #include "autopilot.h"
     #include "modules/rl_cfc_control/rl_cfc_control.h"
     inline void setNav(void) {
@@ -21,8 +21,8 @@
   </header>
   <waypoints>
     <waypoint lat="51.990631" lon="4.376796" name="HOME"/>
-    <waypoint name="CLIMB" x="1.9" y="1.0"/>
-    <waypoint name="STDBY" x="1.9" y="1.0"/>
+    <waypoint name="CLIMB" x="1.9" y="1.0" height="1.0"/>
+    <waypoint name="STDBY" x="1.9" y="1.0" height="1.0"/>
     <waypoint name="TD" x="0.8" y="-1.7" height="0.5"/>
     <waypoint name="GOAL" x="1.9" y="1.0"/>
     <waypoint name="TRAJECTORY" x="1.9" y="1.0"/>
@@ -35,6 +35,21 @@
     <waypoint name="RL_F8_6" x="0.0" y="0.0" height="1.5"/>
     <waypoint name="RL_F8_7" x="-1.5" y="-1.5" height="1.5"/>
     <waypoint name="RL_F8_8" x="-3.0" y="0.0" height="1.5"/>
+    <!-- Thin top-view rectangles used by PPRZ GCS to show each gate plane. -->
+    <waypoint name="_G1A" x="-1.54" y="0.75"/><waypoint name="_G1B" x="-1.46" y="0.75"/>
+    <waypoint name="_G1C" x="-1.46" y="2.25"/><waypoint name="_G1D" x="-1.54" y="2.25"/>
+    <waypoint name="_G26A" x="-0.75" y="-0.04"/><waypoint name="_G26B" x="0.75" y="-0.04"/>
+    <waypoint name="_G26C" x="0.75" y="0.04"/><waypoint name="_G26D" x="-0.75" y="0.04"/>
+    <waypoint name="_G3A" x="1.46" y="-2.25"/><waypoint name="_G3B" x="1.54" y="-2.25"/>
+    <waypoint name="_G3C" x="1.54" y="-0.75"/><waypoint name="_G3D" x="1.46" y="-0.75"/>
+    <waypoint name="_G4A" x="2.25" y="-0.04"/><waypoint name="_G4B" x="3.75" y="-0.04"/>
+    <waypoint name="_G4C" x="3.75" y="0.04"/><waypoint name="_G4D" x="2.25" y="0.04"/>
+    <waypoint name="_G5A" x="1.46" y="0.75"/><waypoint name="_G5B" x="1.54" y="0.75"/>
+    <waypoint name="_G5C" x="1.54" y="2.25"/><waypoint name="_G5D" x="1.46" y="2.25"/>
+    <waypoint name="_G7A" x="-1.54" y="-2.25"/><waypoint name="_G7B" x="-1.46" y="-2.25"/>
+    <waypoint name="_G7C" x="-1.46" y="-0.75"/><waypoint name="_G7D" x="-1.54" y="-0.75"/>
+    <waypoint name="_G8A" x="-3.75" y="-0.04"/><waypoint name="_G8B" x="-2.25" y="-0.04"/>
+    <waypoint name="_G8C" x="-2.25" y="0.04"/><waypoint name="_G8D" x="-3.75" y="0.04"/>
     <waypoint lat="51.9905834" lon="4.3767710" name="_CZ1"/>
     <waypoint lat="51.9906440" lon="4.3767060" name="_CZ2"/>
     <waypoint lat="51.9906860" lon="4.3768080" name="_CZ3"/>
@@ -47,6 +62,15 @@
 
   <!--=== Sectors: define geofence regions ===-->
   <sectors>
+    <!-- Gate planes (1.5 m opening). Gates 2 and 6 share one physical gate. -->
+    <sector color="#00BFFF" name="GATE_1"><corner name="_G1A"/><corner name="_G1B"/><corner name="_G1C"/><corner name="_G1D"/></sector>
+    <sector color="#00BFFF" name="GATE_2_6"><corner name="_G26A"/><corner name="_G26B"/><corner name="_G26C"/><corner name="_G26D"/></sector>
+    <sector color="#00BFFF" name="GATE_3"><corner name="_G3A"/><corner name="_G3B"/><corner name="_G3C"/><corner name="_G3D"/></sector>
+    <sector color="#00BFFF" name="GATE_4"><corner name="_G4A"/><corner name="_G4B"/><corner name="_G4C"/><corner name="_G4D"/></sector>
+    <sector color="#00BFFF" name="GATE_5"><corner name="_G5A"/><corner name="_G5B"/><corner name="_G5C"/><corner name="_G5D"/></sector>
+    <sector color="#00BFFF" name="GATE_7"><corner name="_G7A"/><corner name="_G7B"/><corner name="_G7C"/><corner name="_G7D"/></sector>
+    <sector color="#00BFFF" name="GATE_8"><corner name="_G8A"/><corner name="_G8B"/><corner name="_G8C"/><corner name="_G8D"/></sector>
+
     <!-- Outer geofence (hard stop, Cyberzoo walls) -->
     <sector color="red" name="CyberZoo">
       <corner name="_CZ1"/>

@@ -16,7 +16,6 @@ extern uint32_t rl_cfc_control_periodic_dt_us;
 extern uint32_t rl_cfc_control_sensor_read_time_us;
 extern uint32_t rl_cfc_control_inference_time_us;
 extern uint32_t rl_cfc_control_total_time_us;
-extern float rl_cfc_control_reached_radius_m;
 extern bool rl_cfc_control_use_ned_input;
 extern float rl_cfc_control_target[3];
 extern float rl_cfc_control_error[3];

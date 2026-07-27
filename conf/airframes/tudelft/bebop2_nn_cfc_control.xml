@@ -216,10 +216,8 @@
     <define name="DESCEND_VSPEED" value="-1.0"/>
   </section>
 
-  <section name="SIMULATOR" prefix="NPS_">
-    <define name="ACTUATOR_NAMES" value="nw_motor, ne_motor, se_motor, sw_motor" type="string[]"/>
-  </section>
-  <include href="conf/simulator/gazebo/airframes/bebop2.xml"/>
+  <!-- Simulation-only full Matlab aerodynamics; the real ap target is unaffected. -->
+  <include href="conf/simulator/gazebo/airframes/bebop2_cfc_sim.xml"/>
 
   <section name="AUTOPILOT">
     <define name="MODE_STARTUP" value="AP_MODE_NAV"/>

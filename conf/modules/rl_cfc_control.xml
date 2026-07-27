@@ -4,7 +4,7 @@
     <description>
       Recurrent PPO CfC controller wrapper for the TU Delft Cyberzoo figure-eight gate test.
       The RL network receives the observation order defined by rl_cfc_parameters.h and returns
-      actions in [-1,1]. The wrapper maps those actions directly to Bebop RPM commands, matching
+      normalized motor actions in [0,1]. The wrapper maps those actions directly to Bebop RPM commands, matching
       the direct motor set path used by nn_cfc_control.
     </description>
   </doc>
@@ -47,14 +47,14 @@
         <dl_setting var="rl_cfc_control_raw_action[1]" min="-100" step="0.001" max="100" shortname="raw1" type="float"/>
         <dl_setting var="rl_cfc_control_raw_action[2]" min="-100" step="0.001" max="100" shortname="raw2" type="float"/>
         <dl_setting var="rl_cfc_control_raw_action[3]" min="-100" step="0.001" max="100" shortname="raw3" type="float"/>
-        <dl_setting var="rl_cfc_control_policy_raw_action[0]" min="-100" step="0.001" max="100" shortname="pr0" type="float"/>
-        <dl_setting var="rl_cfc_control_policy_raw_action[1]" min="-100" step="0.001" max="100" shortname="pr1" type="float"/>
-        <dl_setting var="rl_cfc_control_policy_raw_action[2]" min="-100" step="0.001" max="100" shortname="pr2" type="float"/>
-        <dl_setting var="rl_cfc_control_policy_raw_action[3]" min="-100" step="0.001" max="100" shortname="pr3" type="float"/>
-        <dl_setting var="rl_cfc_control_action[0]" min="-1" step="0.001" max="1" shortname="a0" type="float"/>
-        <dl_setting var="rl_cfc_control_action[1]" min="-1" step="0.001" max="1" shortname="a1" type="float"/>
-        <dl_setting var="rl_cfc_control_action[2]" min="-1" step="0.001" max="1" shortname="a2" type="float"/>
-        <dl_setting var="rl_cfc_control_action[3]" min="-1" step="0.001" max="1" shortname="a3" type="float"/>
+        <dl_setting var="rl_cfc_control_policy_raw_action[0]" min="0" step="0.001" max="1" shortname="pr0" type="float"/>
+        <dl_setting var="rl_cfc_control_policy_raw_action[1]" min="0" step="0.001" max="1" shortname="pr1" type="float"/>
+        <dl_setting var="rl_cfc_control_policy_raw_action[2]" min="0" step="0.001" max="1" shortname="pr2" type="float"/>
+        <dl_setting var="rl_cfc_control_policy_raw_action[3]" min="0" step="0.001" max="1" shortname="pr3" type="float"/>
+        <dl_setting var="rl_cfc_control_action[0]" min="0" step="0.001" max="1" shortname="a0" type="float"/>
+        <dl_setting var="rl_cfc_control_action[1]" min="0" step="0.001" max="1" shortname="a1" type="float"/>
+        <dl_setting var="rl_cfc_control_action[2]" min="0" step="0.001" max="1" shortname="a2" type="float"/>
+        <dl_setting var="rl_cfc_control_action[3]" min="0" step="0.001" max="1" shortname="a3" type="float"/>
         <dl_setting var="rl_cfc_control_last_norm[0]" min="0" step="0.001" max="1" shortname="m0_norm" type="float"/>
         <dl_setting var="rl_cfc_control_last_norm[1]" min="0" step="0.001" max="1" shortname="m1_norm" type="float"/>
         <dl_setting var="rl_cfc_control_last_norm[2]" min="0" step="0.001" max="1" shortname="m2_norm" type="float"/>

@@ -2,9 +2,9 @@
 
 <airframe name="bebop2_rl_cfc_control">
   <description>
-    Bebop2 recurrent PPO CFC control test airframe, using the same Bebop2
-    Optitrack tuning, direct motor RPM path, and Gazebo setup as
-    bebop2_nn_cfc_control.
+    Bebop2 recurrent PPO CFC control airframe. In NPS/Gazebo it enables the
+    Matlab-matched aerodynamic model after neural-controller activation; the
+    real-drone target uses the physical vehicle dynamics and measured RPM.
   </description>
 
   <firmware name="rotorcraft">
@@ -68,10 +68,6 @@
     <define name="TRIM_YAW" value="0"/>
     <define name="REVERSE" value="TRUE"/>
     <define name="TYPE" value="QUAD_X"/>
-  </section>
-
-  <section name="RL_CFC_CONTROL" prefix="RL_CFC_">
-    <define name="REVERSE_YAW_OUTPUT" value="TRUE"/>
   </section>
 
   <command_laws>
@@ -216,14 +212,9 @@
 
   <section name="NAVIGATION" prefix="NAV_">
     <define name="CLIMB_VSPEED" value="0.5"/>
-    <define name="DESCEND_VSPEED" value="-1.0"/>
   </section>
 
-  <section name="SIMULATOR" prefix="NPS_">
-    <define name="ACTUATOR_NAMES" value="nw_motor, ne_motor, se_motor, sw_motor" type="string[]"/>
-    <define name="SENSORS_PARAMS" value="nps_sensors_params_noisy.h" type="string"/> <!-- To add noise sensors for simulation -->
-  </section>
-  <include href="conf/simulator/gazebo/airframes/bebop2.xml"/>
+  <include href="conf/simulator/gazebo/airframes/bebop2_cfc_sim.xml"/>
 
   <section name="AUTOPILOT">
     <define name="MODE_STARTUP" value="AP_MODE_NAV"/>

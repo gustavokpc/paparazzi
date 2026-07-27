@@ -31,10 +31,8 @@
       </program>
     </session>
     <session name="Flight UDP RL">
-      <program name="Log Plotter"/>
       <program name="Data Link">
         <arg flag="-udp"/>
-        <arg flag="-udp_broadcast"/>
       </program>
       <program name="UnifiedMoCap">
         <arg flag="optitrack"/>
@@ -45,33 +43,15 @@
         <arg flag="--craft_noses" constant="right"/>
         <arg flag="--long_edge" constant="near"/>
         <arg flag="--streaming_ids" constant="183"/>
-        <arg flag="--ac_id" constant="42"/>
+        <arg flag="--ac_id" constant="45"/>
       </program>
       <program name="Server"/>
       <program name="PprzGCS"/>
       <program name="Joystick">
-        <arg flag="-ac" constant="bebop2_nn_cfc"/>
+        <arg flag="-ac" constant="bebop2_rl_cfc"/>
         <arg flag="ps4_gamepad.xml"/>
         <arg flag="-d" constant="0"/>
       </program>
-      <program name="RtpViewer">
-        <arg flag="-s" constant="1"/>
-        <arg flag="-r" constant="3"/>
-      </program>
-      <program name="VLC">
-        <arg flag="./sw/tools/rtp_viewer/rtp_5000.sdp"/>
-      </program>
-      <program name="VLC">
-        <arg flag="./sw/tools/rtp_viewer/rtp_6000.sdp"/>
-      </program>
-      <program name="GST">
-        <arg flag="udpsrc"/>
-        <arg flag="port=5000"/>
-        <arg flag="caps=application/x-rtp,payload=26"/>
-        <arg flag="! rtpjpegdepay ! jpegdec ! videoflip method=counterclockwise ! autovideosink"/>
-      </program>
-      <program name="Real-time Plotter"/>
-      <program name="Real-time Plotter (Python)"/>
     </session>
     <session name="Simulation - Gazebo">
       <program name="Simulator">

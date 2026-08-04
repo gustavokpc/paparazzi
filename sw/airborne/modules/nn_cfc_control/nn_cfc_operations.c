@@ -5,7 +5,7 @@
 #define BN_EPS 1.0e-5f
 
 #if NUM_STATES != 19
-#error "This Conv-CfC export expects exactly 19 expanded state inputs."
+#error "The bebop2_delayed_correct_sign export expects exactly 19 physical state inputs."
 #endif
 
 static float nn_hidden[HIDDEN_SIZE];
@@ -180,7 +180,10 @@ void nn_control(const float *state, float *control)
          rnn_rnn_cell_time_b_weight, rnn_rnn_cell_time_b_bias,
          128, HIDDEN_SIZE);
 
-  /* No-dt checkpoint: ncps.CfC uses an implicit timespan of exactly 1.0. */
+  /*
+   * This checkpoint has no dt input. ncps.CfC therefore used its implicit
+   * timespan of exactly 1.0 during training and Python inference.
+   */
   for (int i = 0; i < HIDDEN_SIZE; ++i) {
     const float f1 = tanhf(ff1[i]);
     const float f2 = tanhf(ff2[i]);

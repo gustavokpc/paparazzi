@@ -21,6 +21,51 @@
 #include "modules/nn_cfc_control/nn_cfc_operations.h"
 
 /*
+ * External-moment observer mode. Change only NN_CFC_MEXT_MODE:
+ *   OFF        do not run the observer; feed Mext = {0, 0, 0};
+ *   BACKGROUND run and log the observer; still feed Mext = {0, 0, 0};
+ *   ON         run and log the observer; feed its Mext estimate to the NN.
+ *
+ * This is a compile-time choice so OFF removes all observer work from the
+ * 100 Hz control path. Use BACKGROUND first to measure nn_mext_time_us and
+ * validate the estimate before allowing it to affect network commands.
+ */
+#define OFF 0
+#define BACKGROUND 1
+#define ON 2
+#define NN_CFC_MEXT_MODE ON /* Change here the mode of MEXT */
+
+#if NN_CFC_MEXT_MODE != OFF && NN_CFC_MEXT_MODE != BACKGROUND && NN_CFC_MEXT_MODE != ON
+#error "NN_CFC_MEXT_MODE must be OFF, BACKGROUND, or ON"
+#endif
+
+#if NN_CFC_MEXT_MODE != OFF
+#include "modules/nn_cfc_control/nn_cfc_moment_observer.h"
+#endif
+
+/*
+ * Low-pass filter applied only to the p/q/r inputs consumed by the NN.
+ *
+ * Set NN_CFC_RATE_FILTER_ENABLED to 0 to compile it out completely. When it
+ * is enabled, select either the original first-order filter or the same
+ * second-order Butterworth type used by the external-moment observer. The
+ * input filter owns separate state, so it does not depend on the Mext mode.
+ */
+#define NN_CFC_RATE_FILTER_ENABLED 1
+#define NN_CFC_RATE_FILTER_CUTOFF_HZ 10.0f
+#define NN_CFC_RATE_FILTER_FIRST_ORDER 1
+#define NN_CFC_RATE_FILTER_BUTTERWORTH 2
+#define NN_CFC_RATE_FILTER_TYPE NN_CFC_RATE_FILTER_FIRST_ORDER
+
+#if NN_CFC_RATE_FILTER_ENABLED
+#if NN_CFC_RATE_FILTER_TYPE != NN_CFC_RATE_FILTER_FIRST_ORDER && \
+    NN_CFC_RATE_FILTER_TYPE != NN_CFC_RATE_FILTER_BUTTERWORTH
+#error "NN_CFC_RATE_FILTER_TYPE must be NN_CFC_RATE_FILTER_FIRST_ORDER or NN_CFC_RATE_FILTER_BUTTERWORTH"
+#endif
+#include "filters/low_pass_filter.h"
+#endif
+
+/*
  * Exported NN files are not fully consistent across generated models:
  * some expose nn_reset()/nn_control(), others expose nn_cfc_reset()/
  * nn_cfc_control() plus nn_cfc_last_raw_control. Keep the wrapper compatible
@@ -29,10 +74,16 @@
 #if defined(NN_CFC_OPERATIONS_H) && !defined(NN_OPERATIONS_H)
 #define NN_NET_RESET() nn_cfc_reset()
 #define NN_NET_CONTROL(state, control) nn_cfc_control((state), (control))
+#define NN_NET_SET_TIMESPAN(timespan_s) ((void)(timespan_s))
 #define NN_NET_HAS_LAST_RAW_CONTROL 1
 #else
 #define NN_NET_RESET() nn_reset()
 #define NN_NET_CONTROL(state, control) nn_control((state), (control))
+#if NN_CFC_SUPPORTS_RUNTIME_TIMESPAN
+#define NN_NET_SET_TIMESPAN(timespan_s) nn_set_timespan(timespan_s)
+#else
+#define NN_NET_SET_TIMESPAN(timespan_s) ((void)(timespan_s))
+#endif
 #define NN_NET_HAS_LAST_RAW_CONTROL 0
 #endif
 
@@ -81,7 +132,7 @@
  * variables so there is a single source of truth.
  */
 #ifndef NN_CFC_REACHED_RADIUS_M
-#define NN_CFC_REACHED_RADIUS_M 0.001f
+#define NN_CFC_REACHED_RADIUS_M 0.001f /* in meters */
 #endif
 
 #ifndef NN_CFC_TARGET_ALT_M
@@ -89,8 +140,18 @@
 #endif
 
 #ifndef NN_CFC_START_WAYPOINT_INDEX
-#define NN_CFC_START_WAYPOINT_INDEX 3
+#define NN_CFC_START_WAYPOINT_INDEX 'H' /* 0, 1, 2, 3 (3 is the default for square), 'H', 'X', 'Y', 'Z' */
 #endif
+
+/*
+ * Start-selector values:
+ *   0..3              cycle through the four square waypoints;
+ *   'H', 'X', 'Y', 'Z' hold one fixed target and never auto-advance.
+ */
+#define NN_CFC_WAYPOINT_H ((unsigned int)'H')
+#define NN_CFC_WAYPOINT_X ((unsigned int)'X')
+#define NN_CFC_WAYPOINT_Y ((unsigned int)'Y')
+#define NN_CFC_WAYPOINT_Z ((unsigned int)'Z')
 
 /* RPM is the NN training scale and the Bebop BLDC command unit. */
 #ifndef NN_CFC_MIN_RPM
@@ -144,6 +205,70 @@ typedef struct {
   float psi;
 } nn_euler_t;
 
+#if NN_CFC_RATE_FILTER_ENABLED
+#define NN_CFC_RATE_FILTER_SAMPLE_TIME_S 0.01f
+#define NN_CFC_PI 3.14159265358979323846f
+
+#if NN_CFC_RATE_FILTER_TYPE == NN_CFC_RATE_FILTER_FIRST_ORDER
+static struct FirstOrderLowPass nn_cfc_rate_filter[3];
+#else
+static Butterworth2LowPass nn_cfc_rate_filter[3];
+#endif
+static bool nn_cfc_rate_filters_initialized = false;
+
+static void nn_cfc_reset_rate_filters(void)
+{
+  nn_cfc_rate_filters_initialized = false;
+}
+
+static void nn_cfc_filter_rate_inputs(float net_state[NUM_STATES])
+{
+  if (!nn_cfc_rate_filters_initialized) {
+#if NN_CFC_RATE_FILTER_TYPE == NN_CFC_RATE_FILTER_FIRST_ORDER
+    /*
+     * The Paparazzi FLOAT API expects tau. Prewarp the requested digital
+     * cutoff before passing tau to its bilinear transform.
+     */
+    const float tau =
+        NN_CFC_RATE_FILTER_SAMPLE_TIME_S /
+        (2.0f * tanf(NN_CFC_PI * NN_CFC_RATE_FILTER_CUTOFF_HZ *
+                     NN_CFC_RATE_FILTER_SAMPLE_TIME_S));
+#else
+    /* Match the second-order Butterworth setup used by the Mext observer. */
+    const float tau = 1.0f / (2.0f * NN_CFC_PI * NN_CFC_RATE_FILTER_CUTOFF_HZ);
+#endif
+    for (unsigned int i = 0U; i < 3U; i++) {
+#if NN_CFC_RATE_FILTER_TYPE == NN_CFC_RATE_FILTER_FIRST_ORDER
+      init_first_order_low_pass(&nn_cfc_rate_filter[i], tau,
+                                NN_CFC_RATE_FILTER_SAMPLE_TIME_S, net_state[9U + i]);
+#else
+      init_butterworth_2_low_pass(&nn_cfc_rate_filter[i], tau,
+                                  NN_CFC_RATE_FILTER_SAMPLE_TIME_S, net_state[9U + i]);
+#endif
+    }
+    nn_cfc_rate_filters_initialized = true;
+    return;
+  }
+
+  for (unsigned int i = 0U; i < 3U; i++) {
+#if NN_CFC_RATE_FILTER_TYPE == NN_CFC_RATE_FILTER_FIRST_ORDER
+    net_state[9U + i] = update_first_order_low_pass(&nn_cfc_rate_filter[i], net_state[9U + i]);
+#else
+    net_state[9U + i] = update_butterworth_2_low_pass(&nn_cfc_rate_filter[i], net_state[9U + i]);
+#endif
+  }
+}
+#else
+static void nn_cfc_reset_rate_filters(void)
+{
+}
+
+static void nn_cfc_filter_rate_inputs(float net_state[NUM_STATES])
+{
+  (void)net_state;
+}
+#endif
+
 bool nn_cfc_control_enabled = false;
 unsigned int nn_cfc_control_waypoint_index = 0;
 float nn_cfc_control_last_norm[4] = {0.f, 0.f, 0.f, 0.f};
@@ -156,6 +281,8 @@ uint32_t nn_cfc_control_periodic_dt_us = 0U;
 uint32_t nn_cfc_control_sensor_read_time_us = 0U;
 uint32_t nn_cfc_control_inference_time_us = 0U;
 uint32_t nn_cfc_control_total_time_us = 0U;
+uint32_t nn_cfc_control_mext_time_us = 0U;
+const uint8_t nn_cfc_control_mext_mode = NN_CFC_MEXT_MODE;
 unsigned int nn_cfc_control_waypoint_switch_count = 0U;
 float nn_cfc_control_reached_radius_m = NN_CFC_REACHED_RADIUS_M;
 float nn_cfc_control_target[3] = {0.f, 0.f, 0.f};
@@ -164,6 +291,9 @@ float nn_cfc_control_error[3] = {0.f, 0.f, 0.f};
 float nn_cfc_control_input_error[3] = {0.f, 0.f, 0.f};
 float nn_cfc_control_input_velocity[3] = {0.f, 0.f, 0.f};
 float nn_cfc_control_external_moment_nm[3] = {0.f, 0.f, 0.f};
+float nn_cfc_control_measured_moment_nm[3] = {0.f, 0.f, 0.f};
+float nn_cfc_control_modeled_moment_nm[3] = {0.f, 0.f, 0.f};
+float nn_cfc_control_observer_filtered_rates[3] = {0.f, 0.f, 0.f};
 float nn_cfc_control_feedback_rpm[4] = {0.f, 0.f, 0.f, 0.f};
 float nn_cfc_control_attitude[3] = {0.f, 0.f, 0.f};
 float nn_cfc_control_body_rates[3] = {0.f, 0.f, 0.f};
@@ -212,6 +342,14 @@ static const nn_vec3_t nn_square_waypoints[] = {
 };
 static const unsigned int nn_num_square_waypoints = sizeof(nn_square_waypoints) / sizeof(nn_square_waypoints[0]);
 
+/* Fixed ENU targets selected with 'H', 'X', 'Y', or 'Z'. */
+static const nn_vec3_t nn_fixed_waypoints[] = {
+  {0.0f, 0.0f, 1.0f},
+  {1.5f, 0.0f, 1.0f},
+  {0.0f, 1.5f, 1.0f},
+  {0.0f, 0.0f, 2.0f},
+};
+
 static uint32_t nn_cfc_timing_now_usec(void)
 {
 #ifdef SITL
@@ -237,6 +375,62 @@ static nn_vec3_t get_square_waypoint(unsigned int index)
 #else
   return nn_square_waypoints[index % nn_num_square_waypoints];
 #endif
+}
+
+static bool is_fixed_waypoint_selector(unsigned int selector)
+{
+  return selector == NN_CFC_WAYPOINT_H ||
+         selector == NN_CFC_WAYPOINT_X ||
+         selector == NN_CFC_WAYPOINT_Y ||
+         selector == NN_CFC_WAYPOINT_Z;
+}
+
+static unsigned int normalize_waypoint_selector(unsigned int selector)
+{
+  return is_fixed_waypoint_selector(selector) ? selector : selector % nn_num_square_waypoints;
+}
+
+static nn_vec3_t get_fixed_waypoint(unsigned int selector)
+{
+  /*
+   * Prefer flight-plan waypoints so the fixed targets are visible and can be
+   * adjusted from the GCS. Keep static fallbacks for builds/tests without them.
+   */
+  switch (selector) {
+    case NN_CFC_WAYPOINT_H:
+#ifdef WP_NN_H
+      return (nn_vec3_t){waypoint_get_x(WP_NN_H), waypoint_get_y(WP_NN_H), waypoint_get_alt(WP_NN_H)};
+#else
+      return nn_fixed_waypoints[0];
+#endif
+    case NN_CFC_WAYPOINT_X:
+#ifdef WP_NN_X
+      return (nn_vec3_t){waypoint_get_x(WP_NN_X), waypoint_get_y(WP_NN_X), waypoint_get_alt(WP_NN_X)};
+#else
+      return nn_fixed_waypoints[1];
+#endif
+    case NN_CFC_WAYPOINT_Y:
+#ifdef WP_NN_Y
+      return (nn_vec3_t){waypoint_get_x(WP_NN_Y), waypoint_get_y(WP_NN_Y), waypoint_get_alt(WP_NN_Y)};
+#else
+      return nn_fixed_waypoints[2];
+#endif
+    case NN_CFC_WAYPOINT_Z:
+#ifdef WP_NN_Z
+      return (nn_vec3_t){waypoint_get_x(WP_NN_Z), waypoint_get_y(WP_NN_Z), waypoint_get_alt(WP_NN_Z)};
+#else
+      return nn_fixed_waypoints[3];
+#endif
+    default:
+      return nn_fixed_waypoints[0];
+  }
+}
+
+static nn_vec3_t get_selected_waypoint(unsigned int selector)
+{
+  return is_fixed_waypoint_selector(selector) ?
+         get_fixed_waypoint(selector) :
+         get_square_waypoint(selector);
 }
 
 __attribute__((weak)) nn_vec3_t nn_cfc_get_position_m(void)
@@ -476,13 +670,33 @@ static void reset_target_debug(void)
   nn_cfc_control_abs_z_error = 0.f;
 }
 
+static void reset_mext_observer_state(void)
+{
+  nn_cfc_control_mext_time_us = 0U;
+  for (unsigned int i = 0U; i < 3U; i++) {
+    nn_cfc_control_external_moment_nm[i] = 0.f;
+    nn_cfc_control_measured_moment_nm[i] = 0.f;
+    nn_cfc_control_modeled_moment_nm[i] = 0.f;
+    nn_cfc_control_observer_filtered_rates[i] = 0.f;
+  }
+#if NN_CFC_MEXT_MODE != OFF
+  nn_cfc_moment_observer_reset();
+#endif
+}
+
 static void maybe_advance_waypoint(const nn_vec3_t pos)
 {
   /*
    * Waypoint switching is separate from the neural control itself. The network
-   * always receives an error to the current active waypoint; this function only
-   * decides when to move to the next waypoint in the rectangle.
+   * always receives an error to the current active waypoint. Numeric selectors
+   * 0..3 cycle around the rectangle; H/X/Y/Z are fixed targets and deliberately
+   * ignore nn_cfc_control_reached_radius_m.
    */
+  if (is_fixed_waypoint_selector(nn_cfc_control_waypoint_index)) {
+    update_target_debug(pos, get_fixed_waypoint(nn_cfc_control_waypoint_index));
+    return;
+  }
+
   const nn_vec3_t wp = get_square_waypoint(nn_cfc_control_waypoint_index);
   const float d2 = waypoint_dist2(pos, wp);
   const float reached_radius = nn_cfc_control_reached_radius_m > 0.f ? nn_cfc_control_reached_radius_m : 0.05f;
@@ -503,6 +717,7 @@ void nn_cfc_control_init(void)
   nn_cfc_control_sensor_read_time_us = 0U;
   nn_cfc_control_inference_time_us = 0U;
   nn_cfc_control_total_time_us = 0U;
+  nn_cfc_control_mext_time_us = 0U;
   nn_cfc_control_last_periodic_start_us = 0U;
   nn_cfc_control_waypoint_switch_count = 0U;
   for (unsigned int i = 0; i < 4U; i++) {
@@ -522,9 +737,7 @@ void nn_cfc_control_init(void)
 #if !NN_CFC_HAS_BEBOP_ACTUATORS
   reset_sim_motor_feedback_rpm(NN_CFC_TRAIN_HOVER_RPM);
 #endif
-  for (unsigned int i = 0; i < 3U; i++) {
-    nn_cfc_control_external_moment_nm[i] = 0.f;
-  }
+  reset_mext_observer_state();
   for (unsigned int i = 0; i < NUM_STATES; i++) {
     nn_cfc_control_net_input_state[i] = 0.f;
     nn_cfc_control_net_input_normalized[i] = 0.f;
@@ -538,8 +751,9 @@ void nn_cfc_control_init(void)
   nn_cfc_control_timing_values[3] = 0.f;
   nn_cfc_control_raw_mean_rpm = 0;
   reset_target_debug();
-  nn_cfc_control_waypoint_index = NN_CFC_START_WAYPOINT_INDEX % nn_num_square_waypoints;
-  update_target_debug(nn_cfc_get_position_m(), get_square_waypoint(nn_cfc_control_waypoint_index));
+  nn_cfc_control_waypoint_index = normalize_waypoint_selector(NN_CFC_START_WAYPOINT_INDEX);
+  update_target_debug(nn_cfc_get_position_m(), get_selected_waypoint(nn_cfc_control_waypoint_index));
+  nn_cfc_reset_rate_filters();
   NN_NET_RESET();
 #ifdef MODULE_LOGGER_FILE_ID
   logger_file_start();
@@ -572,6 +786,7 @@ void nn_cfc_control_start(void)
   nn_cfc_control_sensor_read_time_us = 0U;
   nn_cfc_control_inference_time_us = 0U;
   nn_cfc_control_total_time_us = 0U;
+  nn_cfc_control_mext_time_us = 0U;
   nn_cfc_control_last_periodic_start_us = 0U;
   nn_cfc_control_waypoint_switch_count = 0U;
   for (unsigned int i = 0; i < 4U; i++) {
@@ -590,8 +805,10 @@ void nn_cfc_control_start(void)
   reset_sim_motor_feedback_rpm(NN_CFC_TRAIN_HOVER_RPM);
 #endif
   nn_cfc_control_raw_mean_rpm = 0;
-  nn_cfc_control_waypoint_index = NN_CFC_START_WAYPOINT_INDEX % nn_num_square_waypoints;
-  update_target_debug(nn_cfc_get_position_m(), get_square_waypoint(nn_cfc_control_waypoint_index));
+  nn_cfc_control_waypoint_index = normalize_waypoint_selector(NN_CFC_START_WAYPOINT_INDEX);
+  update_target_debug(nn_cfc_get_position_m(), get_selected_waypoint(nn_cfc_control_waypoint_index));
+  nn_cfc_reset_rate_filters();
+  reset_mext_observer_state();
   NN_NET_RESET();
 #ifdef MODULE_LOGGER_FILE_ID
   logger_file_start();
@@ -606,6 +823,7 @@ void nn_cfc_control_stop(void)
   nn_cfc_control_sensor_read_time_us = 0U;
   nn_cfc_control_inference_time_us = 0U;
   nn_cfc_control_total_time_us = 0U;
+  nn_cfc_control_mext_time_us = 0U;
   nn_cfc_control_last_periodic_start_us = 0U;
   for (unsigned int i = 0; i < 4U; i++) {
     nn_cfc_control_last_norm[i] = 0.f;
@@ -618,6 +836,7 @@ void nn_cfc_control_stop(void)
   reset_sim_motor_feedback_rpm(NN_CFC_TRAIN_HOVER_RPM);
 #endif
   nn_cfc_control_raw_mean_rpm = 0;
+  reset_mext_observer_state();
   reset_target_debug();
   NN_NET_RESET();
 }
@@ -640,6 +859,10 @@ void nn_cfc_control_periodic(void)
   }
   nn_cfc_control_last_periodic_start_us = periodic_start_us;
   nn_cfc_control_periodic_count++;
+  const float measured_timespan_s =
+      nn_cfc_control_periodic_dt_us > 0U
+          ? (float)nn_cfc_control_periodic_dt_us * 1.0e-6f
+          : NN_CFC_CONTROL_TIMESPAN_S;
 
   /*
    * 1. Update waypoint bookkeeping and compute the current ENU error. This is
@@ -677,12 +900,35 @@ void nn_cfc_control_periodic(void)
   nn_cfc_control_body_rates[0] = rates.x;
   nn_cfc_control_body_rates[1] = rates.y;
   nn_cfc_control_body_rates[2] = rates.z;
-  const nn_vec3_t mext = nn_cfc_get_external_moment_nm();
   float omega[4];
   nn_cfc_get_motor_feedback_rpm(omega);
   for (unsigned int i = 0; i < 4U; i++) {
     nn_cfc_control_feedback_rpm[i] = omega[i];
   }
+
+  nn_vec3_t mext = {0.f, 0.f, 0.f};
+#if NN_CFC_MEXT_MODE != OFF
+  const float observer_velocity_body[3] = {nn_vel.x, nn_vel.y, nn_vel.z};
+  const float observer_rates_body[3] = {rates.x, rates.y, rates.z};
+  const uint32_t mext_start_us = nn_cfc_timing_now_usec();
+  nn_cfc_moment_observer_update(
+      observer_velocity_body,
+      observer_rates_body,
+      omega,
+      measured_timespan_s,
+      nn_cfc_control_measured_moment_nm,
+      nn_cfc_control_modeled_moment_nm,
+      nn_cfc_control_external_moment_nm,
+      nn_cfc_control_observer_filtered_rates);
+  nn_cfc_control_mext_time_us = nn_cfc_timing_now_usec() - mext_start_us;
+#if NN_CFC_MEXT_MODE == ON
+  mext.x = nn_cfc_control_external_moment_nm[0];
+  mext.y = nn_cfc_control_external_moment_nm[1];
+  mext.z = nn_cfc_control_external_moment_nm[2];
+#endif
+#else
+  nn_cfc_control_mext_time_us = 0U;
+#endif
   nn_cfc_control_sensor_read_time_us = nn_cfc_timing_now_usec() - sensor_read_start_us;
 
   /*
@@ -697,6 +943,7 @@ void nn_cfc_control_periodic(void)
     mext.x, mext.y, mext.z,
     omega[0], omega[1], omega[2], omega[3]
   };
+  nn_cfc_filter_rate_inputs(net_state);
   /* 4. Save raw/normalized inputs before inference for logger_file and telemetry. */
   for (unsigned int i = 0; i < NUM_STATES; i++) {
     nn_cfc_control_net_input_state[i] = net_state[i];
@@ -705,6 +952,7 @@ void nn_cfc_control_periodic(void)
 
   /* 5. Run the exported CFC network. Output is normalized motor command [0,1]. */
   float normalized_cmd[NUM_CONTROLS];
+  NN_NET_SET_TIMESPAN(measured_timespan_s);
   const uint32_t inference_start_us = nn_cfc_timing_now_usec();
   NN_NET_CONTROL(net_state, normalized_cmd);
   nn_cfc_control_inference_time_us = nn_cfc_timing_now_usec() - inference_start_us;

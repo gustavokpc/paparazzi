@@ -1,7 +1,7 @@
 /*
 File: nn_cfc_parameters.h
-Generated from: conv_cfc_default_n64_bebop2_no_dt_lecun.ckpt
-Model kind: no-dt Conv-CfC default, 64 hidden units, LeCun backbone
+Generated from: conv_cfc_default_n64_bebop2_delayed_correct_sign.ckpt
+Model kind: Conv-CfC default, 64 hidden units, LeCun-tanh backbone
 Input order: dx, dy, dz, vx, vy, vz, phi, theta, psi, p, q, r, Mx_ext, My_ext, Mz_ext, omega1, omega2, omega3, omega4
 Normalization: bebop2_tau_0_06
 CfC timespan: implicit 1.0 (the checkpoint was trained without dt)

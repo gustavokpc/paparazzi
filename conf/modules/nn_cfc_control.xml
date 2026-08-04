@@ -19,8 +19,9 @@
         <dl_setting var="nn_cfc_control_sensor_read_time_us" min="0" step="1" max="1000000" shortname="sense_us" type="uint32"/>
         <dl_setting var="nn_cfc_control_inference_time_us" min="0" step="1" max="1000000" shortname="infer_us" type="uint32"/>
         <dl_setting var="nn_cfc_control_total_time_us" min="0" step="1" max="1000000" shortname="total_us" type="uint32"/>
+        <dl_setting var="nn_cfc_control_mext_time_us" min="0" step="1" max="1000000" shortname="mext_us" type="uint32"/>
         <dl_setting var="nn_cfc_control_waypoint_switch_count" min="0" step="1" max="1000000" shortname="wp_sw" type="uint32"/>
-        <dl_setting var="nn_cfc_control_waypoint_index" min="0" step="1" max="3" shortname="wp_idx" type="uint32"/>
+        <dl_setting var="nn_cfc_control_waypoint_index" min="0" step="1" max="90" shortname="wp_idx" type="uint32"/>
         <dl_setting var="nn_cfc_control_error[0]" min="-20" step="0.01" max="20" shortname="err_x" type="float"/>
         <dl_setting var="nn_cfc_control_error[1]" min="-20" step="0.01" max="20" shortname="err_y" type="float"/>
         <dl_setting var="nn_cfc_control_error[2]" min="-10" step="0.01" max="10" shortname="err_z" type="float"/>
@@ -90,6 +91,7 @@
 
   <makefile target="ap|nps">
     <file name="nn_cfc_control.c"/>
+    <file name="nn_cfc_moment_observer.c"/>
     <file name="nn_cfc_operations.c"/>
     <file name="nn_cfc_parameters.c"/>
   </makefile>

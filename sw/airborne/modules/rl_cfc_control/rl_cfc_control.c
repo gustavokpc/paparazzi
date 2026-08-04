@@ -17,6 +17,23 @@
 #include "modules/rl_cfc_control/rl_cfc_control.h"
 #include "modules/rl_cfc_control/rl_cfc_operations.h"
 
+/*
+ * External-moment observer mode. RL never receives Mext as an observation:
+ *   OFF        do not run the observer;
+ *   BACKGROUND run and log the observer without changing the RL policy input.
+ */
+#define OFF 0
+#define BACKGROUND 1
+#define RL_CFC_MEXT_MODE OFF
+
+#if RL_CFC_MEXT_MODE != OFF && RL_CFC_MEXT_MODE != BACKGROUND
+#error "RL_CFC_MEXT_MODE must be OFF or BACKGROUND"
+#endif
+
+#if RL_CFC_MEXT_MODE == BACKGROUND
+#include "modules/nn_cfc_control/nn_cfc_moment_observer.h"
+#endif
+
 #include "paparazzi.h"
 #include "autopilot.h"
 #include "state.h"
@@ -26,6 +43,26 @@
 #include "mcu_periph/sys_time.h"
 #include "modules/actuators/motor_mixing.h"
 #include "modules/nav/waypoints.h"
+
+/*
+ * Low-pass filter applied only to the p/q/r observations consumed by the RL
+ * policy. Set RL_CFC_RATE_FILTER_ENABLED to 0 to compile it out completely.
+ * When enabled, select the original first-order filter or the second-order
+ * Butterworth filter also used by the external-moment observer.
+ */
+#define RL_CFC_RATE_FILTER_ENABLED 0
+#define RL_CFC_RATE_FILTER_CUTOFF_HZ 10.0f
+#define RL_CFC_RATE_FILTER_FIRST_ORDER 1
+#define RL_CFC_RATE_FILTER_BUTTERWORTH 2
+#define RL_CFC_RATE_FILTER_TYPE RL_CFC_RATE_FILTER_FIRST_ORDER
+
+#if RL_CFC_RATE_FILTER_ENABLED
+#if RL_CFC_RATE_FILTER_TYPE != RL_CFC_RATE_FILTER_FIRST_ORDER && \
+    RL_CFC_RATE_FILTER_TYPE != RL_CFC_RATE_FILTER_BUTTERWORTH
+#error "RL_CFC_RATE_FILTER_TYPE must be RL_CFC_RATE_FILTER_FIRST_ORDER or RL_CFC_RATE_FILTER_BUTTERWORTH"
+#endif
+#include "filters/low_pass_filter.h"
+#endif
 
 #ifdef MODULE_LOGGER_FILE_ID
 #include "modules/loggers/logger_file.h"
@@ -69,6 +106,69 @@
 
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
+#endif
+
+#if RL_CFC_RATE_FILTER_ENABLED
+#define RL_CFC_RATE_FILTER_SAMPLE_TIME_S 0.01f
+
+#if RL_CFC_RATE_FILTER_TYPE == RL_CFC_RATE_FILTER_FIRST_ORDER
+static struct FirstOrderLowPass rl_cfc_rate_filter[3];
+#else
+static Butterworth2LowPass rl_cfc_rate_filter[3];
+#endif
+static bool rl_cfc_rate_filters_initialized = false;
+
+static void rl_cfc_reset_rate_filters(void)
+{
+  rl_cfc_rate_filters_initialized = false;
+}
+
+static void rl_cfc_filter_rate_observations(float obs[NUM_STATES])
+{
+  if (!rl_cfc_rate_filters_initialized) {
+#if RL_CFC_RATE_FILTER_TYPE == RL_CFC_RATE_FILTER_FIRST_ORDER
+    /*
+     * The Paparazzi FLOAT API expects tau, not cutoff frequency. Prewarp the
+     * requested digital cutoff before passing tau to its bilinear transform.
+     */
+    const float tau =
+        RL_CFC_RATE_FILTER_SAMPLE_TIME_S /
+        (2.0f * tanf((float)M_PI * RL_CFC_RATE_FILTER_CUTOFF_HZ *
+                     RL_CFC_RATE_FILTER_SAMPLE_TIME_S));
+#else
+    /* Match the second-order Butterworth setup used by the Mext observer. */
+    const float tau = 1.0f / (2.0f * (float)M_PI * RL_CFC_RATE_FILTER_CUTOFF_HZ);
+#endif
+    for (unsigned int i = 0U; i < 3U; i++) {
+#if RL_CFC_RATE_FILTER_TYPE == RL_CFC_RATE_FILTER_FIRST_ORDER
+      init_first_order_low_pass(&rl_cfc_rate_filter[i], tau,
+                                RL_CFC_RATE_FILTER_SAMPLE_TIME_S, obs[9U + i]);
+#else
+      init_butterworth_2_low_pass(&rl_cfc_rate_filter[i], tau,
+                                  RL_CFC_RATE_FILTER_SAMPLE_TIME_S, obs[9U + i]);
+#endif
+    }
+    rl_cfc_rate_filters_initialized = true;
+    return;
+  }
+
+  for (unsigned int i = 0U; i < 3U; i++) {
+#if RL_CFC_RATE_FILTER_TYPE == RL_CFC_RATE_FILTER_FIRST_ORDER
+    obs[9U + i] = update_first_order_low_pass(&rl_cfc_rate_filter[i], obs[9U + i]);
+#else
+    obs[9U + i] = update_butterworth_2_low_pass(&rl_cfc_rate_filter[i], obs[9U + i]);
+#endif
+  }
+}
+#else
+static void rl_cfc_reset_rate_filters(void)
+{
+}
+
+static void rl_cfc_filter_rate_observations(float obs[NUM_STATES])
+{
+  (void)obs;
+}
 #endif
 
 /*
@@ -137,12 +237,18 @@ uint32_t rl_cfc_control_periodic_dt_us = 0U;
 uint32_t rl_cfc_control_sensor_read_time_us = 0U;
 uint32_t rl_cfc_control_inference_time_us = 0U;
 uint32_t rl_cfc_control_total_time_us = 0U;
+uint32_t rl_cfc_control_mext_time_us = 0U;
+const uint8_t rl_cfc_control_mext_mode = RL_CFC_MEXT_MODE;
 bool rl_cfc_control_use_ned_input = true;
 float rl_cfc_control_target[3] = {0.f, 0.f, 0.f};
 float rl_cfc_control_error[3] = {0.f, 0.f, 0.f};
 float rl_cfc_control_input_error[3] = {0.f, 0.f, 0.f};
 float rl_cfc_control_input_velocity[3] = {0.f, 0.f, 0.f};
 float rl_cfc_control_feedback_rpm[4] = {0.f, 0.f, 0.f, 0.f};
+float rl_cfc_control_external_moment_nm[3] = {0.f, 0.f, 0.f};
+float rl_cfc_control_measured_moment_nm[3] = {0.f, 0.f, 0.f};
+float rl_cfc_control_modeled_moment_nm[3] = {0.f, 0.f, 0.f};
+float rl_cfc_control_observer_filtered_rates[3] = {0.f, 0.f, 0.f};
 float rl_cfc_control_motor_state[4] = {0.f, 0.f, 0.f, 0.f};
 float rl_cfc_control_z_sign = 1.0f;
 float rl_cfc_control_vz_sign = 1.0f;
@@ -172,6 +278,61 @@ static bool rl_cfc_control_has_autonomous_authority(void)
 }
 static bool rl_cfc_control_has_previous_gate_projection = false;
 static float rl_cfc_control_previous_gate_projection = 0.f;
+
+/*
+ * Optional NPS-only sample-and-hold for the horizontal position and velocity
+ * consumed by the policy. The real Bebop currently receives external-pose
+ * updates at roughly 8-10 Hz while the RL periodic task runs at 100 Hz.
+ * Holding only x/y and vx/vy reproduces that behavior without degrading the
+ * continuous ground-truth state used by Gazebo itself.
+ */
+#if defined(SITL) && defined(NPS_RL_CFC_HORIZONTAL_OBS_SAMPLE_HOLD) && \
+    NPS_RL_CFC_HORIZONTAL_OBS_SAMPLE_HOLD
+#ifndef NPS_RL_CFC_HORIZONTAL_OBS_UPDATE_DIVIDER
+#error "Define NPS_RL_CFC_HORIZONTAL_OBS_UPDATE_DIVIDER for the NPS sample-and-hold."
+#endif
+#if NPS_RL_CFC_HORIZONTAL_OBS_UPDATE_DIVIDER < 1
+#error "NPS_RL_CFC_HORIZONTAL_OBS_UPDATE_DIVIDER must be at least 1."
+#endif
+static bool rl_cfc_horizontal_obs_hold_initialized = false;
+static rl_vec3_t rl_cfc_horizontal_obs_held_pos;
+static rl_vec3_t rl_cfc_horizontal_obs_held_vel;
+
+static void rl_cfc_reset_horizontal_observation_hold(void)
+{
+  rl_cfc_horizontal_obs_hold_initialized = false;
+}
+
+static void rl_cfc_apply_horizontal_observation_hold(rl_vec3_t *pos, rl_vec3_t *vel)
+{
+  const bool refresh =
+      !rl_cfc_horizontal_obs_hold_initialized ||
+      ((rl_cfc_control_periodic_count - 1U) %
+       NPS_RL_CFC_HORIZONTAL_OBS_UPDATE_DIVIDER) == 0U;
+  if (refresh) {
+    rl_cfc_horizontal_obs_held_pos.x = pos->x;
+    rl_cfc_horizontal_obs_held_pos.y = pos->y;
+    rl_cfc_horizontal_obs_held_vel.x = vel->x;
+    rl_cfc_horizontal_obs_held_vel.y = vel->y;
+    rl_cfc_horizontal_obs_hold_initialized = true;
+  }
+  pos->x = rl_cfc_horizontal_obs_held_pos.x;
+  pos->y = rl_cfc_horizontal_obs_held_pos.y;
+  vel->x = rl_cfc_horizontal_obs_held_vel.x;
+  vel->y = rl_cfc_horizontal_obs_held_vel.y;
+}
+#else
+static void rl_cfc_reset_horizontal_observation_hold(void)
+{
+}
+
+static void rl_cfc_apply_horizontal_observation_hold(rl_vec3_t *pos, rl_vec3_t *vel)
+{
+  (void)pos;
+  (void)vel;
+}
+#endif
+
 #if !RL_CFC_HAS_BEBOP_ACTUATORS
 static float rl_cfc_control_sim_rpm_est[4] = {
   RL_CFC_TRAIN_HOVER_RPM,
@@ -323,6 +484,31 @@ static rl_vec3_t enu_to_ned_vec(const rl_vec3_t enu)
 {
   return (rl_vec3_t){enu.y, enu.x, -enu.z};
 }
+
+#if RL_CFC_MEXT_MODE == BACKGROUND
+static rl_vec3_t rotate_world_to_body_vec(const rl_vec3_t world, const rl_euler_t att)
+{
+  const float cphi = cosf(att.phi);
+  const float sphi = sinf(att.phi);
+  const float ctheta = cosf(att.theta);
+  const float stheta = sinf(att.theta);
+  const float cpsi = cosf(att.psi);
+  const float spsi = sinf(att.psi);
+
+  const float x1 = cpsi * world.x + spsi * world.y;
+  const float y1 = -spsi * world.x + cpsi * world.y;
+  const float z1 = world.z;
+  const float x2 = ctheta * x1 - stheta * z1;
+  const float y2 = y1;
+  const float z2 = stheta * x1 + ctheta * z1;
+
+  return (rl_vec3_t){
+    x2,
+    cphi * y2 + sphi * z2,
+    -sphi * y2 + cphi * z2
+  };
+}
+#endif
 
 static int32_t rpm_to_command(float rpm)
 {
@@ -490,6 +676,20 @@ static void reset_target_debug(void)
   rl_cfc_control_dist_to_target = 0.f;
 }
 
+static void reset_mext_observer_state(void)
+{
+  rl_cfc_control_mext_time_us = 0U;
+  for (unsigned int i = 0U; i < 3U; i++) {
+    rl_cfc_control_external_moment_nm[i] = 0.f;
+    rl_cfc_control_measured_moment_nm[i] = 0.f;
+    rl_cfc_control_modeled_moment_nm[i] = 0.f;
+    rl_cfc_control_observer_filtered_rates[i] = 0.f;
+  }
+#if RL_CFC_MEXT_MODE == BACKGROUND
+  nn_cfc_moment_observer_reset();
+#endif
+}
+
 static void maybe_advance_waypoint(const rl_vec3_t pos)
 {
   const rl_vec3_t wp = get_figure_eight_waypoint(rl_cfc_control_waypoint_index);
@@ -523,6 +723,7 @@ void rl_cfc_control_init(void)
   rl_cfc_control_sensor_read_time_us = 0U;
   rl_cfc_control_inference_time_us = 0U;
   rl_cfc_control_total_time_us = 0U;
+  rl_cfc_control_mext_time_us = 0U;
   rl_cfc_control_last_periodic_start_us = 0U;
   for (unsigned int i = 0; i < 4U; i++) {
     rl_cfc_control_last_norm[i] = 0.f;
@@ -543,6 +744,9 @@ void rl_cfc_control_init(void)
   rl_cfc_control_has_previous_gate_projection = false;
   rl_cfc_control_previous_gate_projection = 0.f;
   reset_target_debug();
+  reset_mext_observer_state();
+  rl_cfc_reset_rate_filters();
+  rl_cfc_reset_horizontal_observation_hold();
   rl_cfc_reset();
 #ifdef MODULE_LOGGER_FILE_ID
   logger_file_start();
@@ -567,7 +771,10 @@ void rl_cfc_control_start(void)
   rl_cfc_control_sensor_read_time_us = 0U;
   rl_cfc_control_inference_time_us = 0U;
   rl_cfc_control_total_time_us = 0U;
+  rl_cfc_control_mext_time_us = 0U;
   rl_cfc_control_last_periodic_start_us = 0U;
+  rl_cfc_reset_rate_filters();
+  rl_cfc_reset_horizontal_observation_hold();
   const float hover_rpm = clampf(RL_CFC_TRAIN_HOVER_RPM, RL_CFC_MIN_RPM, RL_CFC_MAX_RPM);
   const float hover_norm = (hover_rpm - RL_CFC_MIN_RPM) / (RL_CFC_MAX_RPM - RL_CFC_MIN_RPM);
   const float hover_action = hover_norm;
@@ -593,6 +800,7 @@ void rl_cfc_control_start(void)
   rl_cfc_control_waypoint_index = choose_initial_waypoint(start_pos);
   update_target_debug(start_pos, get_figure_eight_waypoint(rl_cfc_control_waypoint_index));
   update_next_gate_debug(rl_cfc_control_waypoint_index);
+  reset_mext_observer_state();
   rl_cfc_reset();
 #ifdef MODULE_LOGGER_FILE_ID
   logger_file_start();
@@ -606,6 +814,7 @@ void rl_cfc_control_stop(void)
   rl_cfc_control_sensor_read_time_us = 0U;
   rl_cfc_control_inference_time_us = 0U;
   rl_cfc_control_total_time_us = 0U;
+  rl_cfc_control_mext_time_us = 0U;
   rl_cfc_control_last_periodic_start_us = 0U;
   for (unsigned int i = 0; i < 4U; i++) {
     rl_cfc_control_last_norm[i] = 0.f;
@@ -626,6 +835,8 @@ void rl_cfc_control_stop(void)
   rl_cfc_control_has_previous_gate_projection = false;
   rl_cfc_control_previous_gate_projection = 0.f;
   reset_target_debug();
+  reset_mext_observer_state();
+  rl_cfc_reset_horizontal_observation_hold();
   rl_cfc_reset();
 }
 
@@ -647,12 +858,22 @@ void rl_cfc_control_periodic(void)
   }
   rl_cfc_control_last_periodic_start_us = periodic_start_us;
   rl_cfc_control_periodic_count++;
+#if RL_CFC_MEXT_MODE == BACKGROUND
+  const float measured_timespan_s =
+      rl_cfc_control_periodic_dt_us > 0U
+          ? (float)rl_cfc_control_periodic_dt_us * 1.0e-6f
+          : CFC_TIMESPAN;
+#endif
 
   const uint32_t sensor_read_start_us = get_sys_time_usec();
-  const rl_vec3_t pos = rl_cfc_get_position_m();
+  rl_vec3_t pos = rl_cfc_get_position_m();
+  rl_vec3_t vel = rl_cfc_get_velocity_mps();
+#if RL_CFC_MEXT_MODE == BACKGROUND
+  const rl_vec3_t observer_velocity_enu = vel;
+#endif
+  rl_cfc_apply_horizontal_observation_hold(&pos, &vel);
   maybe_advance_waypoint(pos);
 
-  const rl_vec3_t vel = rl_cfc_get_velocity_mps();
   const rl_vec3_t err = {
     rl_cfc_control_error[0],
     rl_cfc_control_error[1],
@@ -684,6 +905,29 @@ void rl_cfc_control_periodic(void)
     rl_cfc_control_feedback_rpm[i] = omega[i];
     rl_cfc_control_motor_state[i] = rpm_to_motor_state(omega[i]);
   }
+#if RL_CFC_MEXT_MODE == BACKGROUND
+  const rl_vec3_t observer_velocity_ned = enu_to_ned_vec(observer_velocity_enu);
+  const rl_vec3_t observer_velocity_body = rotate_world_to_body_vec(observer_velocity_ned, att);
+  const float observer_velocity_body_array[3] = {
+    observer_velocity_body.x,
+    observer_velocity_body.y,
+    observer_velocity_body.z
+  };
+  const float observer_rates_body[3] = {rates.x, rates.y, rates.z};
+  const uint32_t mext_start_us = get_sys_time_usec();
+  nn_cfc_moment_observer_update(
+      observer_velocity_body_array,
+      observer_rates_body,
+      omega,
+      measured_timespan_s,
+      rl_cfc_control_measured_moment_nm,
+      rl_cfc_control_modeled_moment_nm,
+      rl_cfc_control_external_moment_nm,
+      rl_cfc_control_observer_filtered_rates);
+  rl_cfc_control_mext_time_us = get_sys_time_usec() - mext_start_us;
+#else
+  rl_cfc_control_mext_time_us = 0U;
+#endif
   rl_cfc_control_sensor_read_time_us = get_sys_time_usec() - sensor_read_start_us;
 
   float obs[NUM_STATES] = {
@@ -705,6 +949,7 @@ void rl_cfc_control_periodic(void)
     rl_cfc_control_next_gate[3]
   };
   rl_cfc_add_nps_observation_noise(obs);
+  rl_cfc_filter_rate_observations(obs);
   for (unsigned int i = 0; i < NUM_STATES; i++) {
     rl_cfc_control_obs[i] = obs[i];
   }

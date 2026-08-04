@@ -94,9 +94,8 @@ void rl_cfc_control_with_state(const float *state, float *hidden_state, float *c
          POLICY_HIDDEN_DIM, NUM_CONTROLS, raw_control);
 
   for (int i = 0; i < NUM_CONTROLS; ++i) {
-    const float action01 = clip01(raw_control[i]);
     rl_cfc_last_raw_control[i] = raw_control[i];
-    control[i] = action01;
+    control[i] = clip01(raw_control[i]);
   }
 }
 

@@ -1,0 +1,45 @@
+{
+  "log": "20260730-092641.csv",
+  "window_s": [
+    30.0,
+    32.0
+  ],
+  "motor_1": {
+    "tau_s": 0.023000000000000003,
+    "delay_s": 0.0125,
+    "rmse_rpm": 108.14024309947155,
+    "r2": 0.9852795354886814,
+    "step_time_s": 30.890789,
+    "effective_tau_without_separate_delay_s": 0.03485
+  },
+  "motor_2": {
+    "tau_s": 0.021750000000000002,
+    "delay_s": 0.0125,
+    "rmse_rpm": 110.83924754567029,
+    "r2": 0.9839408197753126,
+    "step_time_s": 30.890789,
+    "effective_tau_without_separate_delay_s": 0.0336
+  },
+  "motor_3": {
+    "tau_s": 0.026250000000000002,
+    "delay_s": 0.01225,
+    "rmse_rpm": 103.65910007343318,
+    "r2": 0.9869111519848209,
+    "step_time_s": 30.890789,
+    "effective_tau_without_separate_delay_s": 0.0384
+  },
+  "motor_4": {
+    "tau_s": 0.025,
+    "delay_s": 0.013000000000000001,
+    "rmse_rpm": 113.3554400855409,
+    "r2": 0.9837149320436624,
+    "step_time_s": 30.890789,
+    "effective_tau_without_separate_delay_s": 0.037649999999999996
+  },
+  "summary": {
+    "mean_tau_s": 0.024,
+    "std_tau_s": 0.0017410485346480147,
+    "mean_delay_s": 0.0125625,
+    "mean_effective_tau_without_separate_delay_s": 0.036125
+  }
+}

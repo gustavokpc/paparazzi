@@ -1,0 +1,53 @@
+{
+  "log": "20260730-092641.csv",
+  "window_s": [
+    30.0,
+    45.324368
+  ],
+  "samples": 1569,
+  "sample_rate_hz": 102.39606799099907,
+  "nyquist_hz": 51.198033995499536,
+  "mean_motor_rpm_after_startup": 8125.124222529371,
+  "mean_rotor_frequency_hz": 135.41873704215618,
+  "predicted_rotor_alias_hz": 33.02266905115711,
+  "configured_simulation_noise_std_rad_s": {
+    "p": 0.24,
+    "q": 0.12,
+    "r": 0.1
+  },
+  "axes": {
+    "p": {
+      "mean_rad_s": -0.0023189496494582544,
+      "std_rad_s": 0.20857899489509568,
+      "minimum_rad_s": -0.609863,
+      "maximum_rad_s": 0.580811,
+      "skewness": -0.07200907241826851,
+      "excess_kurtosis": -0.5735036289500366,
+      "highpass_residual_std_rad_s": 0.12275715508013454,
+      "dominant_frequency_hz": 31.99877124718721,
+      "power_fraction_30_35_hz_above_5_hz": 0.7723666298880216
+    },
+    "q": {
+      "mean_rad_s": -0.0011079005736137667,
+      "std_rad_s": 0.07830795771535647,
+      "minimum_rad_s": -0.294189,
+      "maximum_rad_s": 0.243164,
+      "skewness": -0.11623054019162896,
+      "excess_kurtosis": -0.3704364554551325,
+      "highpass_residual_std_rad_s": 0.04790559797962629,
+      "dominant_frequency_hz": 33.19872516895673,
+      "power_fraction_30_35_hz_above_5_hz": 0.6293823493987272
+    },
+    "r": {
+      "mean_rad_s": 0.0004907750159337155,
+      "std_rad_s": 0.08190297209662914,
+      "minimum_rad_s": -0.3125,
+      "maximum_rad_s": 0.323486,
+      "skewness": -0.014148013149846914,
+      "excess_kurtosis": -0.1384299563767306,
+      "highpass_residual_std_rad_s": 0.05053655362083755,
+      "dominant_frequency_hz": 31.99877124718721,
+      "power_fraction_30_35_hz_above_5_hz": 0.7277258530466219
+    }
+  }
+}

@@ -1,6 +1,7 @@
 <?xml version='1.0'?>
 <sdf version='1.4'>
   <model name="bebop2_rl_aero">
+    <!-- Gazebo +X points east/right in the Cyberzoo top view. -->
     <pose>0 0 .1 0 0 0</pose>
 
     <link name="chassis">
@@ -18,7 +19,7 @@
         <inertia>
           <!-- Child-link inertia and parallel-axis terms bring the assembled
                model to Python's 0.001920/0.001850/0.003340 kg.m^2. -->
-          <ixx> 0.001169375 </ixx>
+          <ixx> 0.001169375 </ixx> <!-- Default of 0.001169375, 0.001096875, 0.002536250 -->
           <iyy> 0.001096875 </iyy>
           <izz> 0.002536250 </izz>
           <ixy> 0. </ixy>

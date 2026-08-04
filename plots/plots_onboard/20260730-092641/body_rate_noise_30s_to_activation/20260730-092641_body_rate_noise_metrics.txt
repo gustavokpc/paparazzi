@@ -1,0 +1,10 @@
+Log: 20260730-092641.csv
+Window: 30.000000 to 45.324368 s
+Sample rate: 102.396068 Hz; Nyquist: 51.198034 Hz
+Mean motor RPM after startup: 8125.124
+Rotor frequency: 135.418737 Hz
+Predicted rotor alias: 33.022669 Hz
+
+p: mean=-0.002319, std=0.208579, dominant=31.998771 Hz, 30-35 Hz power fraction=0.772367
+q: mean=-0.001108, std=0.078308, dominant=33.198725 Hz, 30-35 Hz power fraction=0.629382
+r: mean=0.000491, std=0.081903, dominant=31.998771 Hz, 30-35 Hz power fraction=0.727726

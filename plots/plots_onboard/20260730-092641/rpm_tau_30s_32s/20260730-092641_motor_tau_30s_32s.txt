@@ -1,0 +1,12 @@
+20260730-092641 | RL recurrent PPO CfC noise-measurements 51.2M | rate filter OFF | janela 30–32 s
+
+Modelo: rpm_obs(t+dt) = exp(-dt/tau)*rpm_obs(t) + (1-exp(-dt/tau))*rpm_ref(t-delay)
+
+M1: tau=23.00 ms, delay=12.50 ms, tau_effective_no_delay=34.85 ms, RMSE=108.1 RPM, R2=0.98528
+M2: tau=21.75 ms, delay=12.50 ms, tau_effective_no_delay=33.60 ms, RMSE=110.8 RPM, R2=0.98394
+M3: tau=26.25 ms, delay=12.25 ms, tau_effective_no_delay=38.40 ms, RMSE=103.7 RPM, R2=0.98691
+M4: tau=25.00 ms, delay=13.00 ms, tau_effective_no_delay=37.65 ms, RMSE=113.4 RPM, R2=0.98371
+
+Mean motor tau: 24.00 ms
+Mean delay: 12.56 ms
+Mean effective tau without separate delay: 36.12 ms

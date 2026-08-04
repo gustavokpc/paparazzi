@@ -110,6 +110,10 @@ static void logger_file_write_header(FILE *file) {
   fprintf(file, "nn_pos_x,nn_pos_y,nn_pos_z,");
   fprintf(file, "nn_err_x,nn_err_y,nn_err_z,");
   fprintf(file, "nn_dist,nn_dist_xy,nn_abs_z_error,");
+  fprintf(file, "nn_mext_mode,nn_mext_est_x,nn_mext_est_y,nn_mext_est_z,");
+  fprintf(file, "nn_mext_measured_x,nn_mext_measured_y,nn_mext_measured_z,");
+  fprintf(file, "nn_mext_modeled_x,nn_mext_modeled_y,nn_mext_modeled_z,");
+  fprintf(file, "nn_mext_filtered_p,nn_mext_filtered_q,nn_mext_filtered_r,nn_mext_time_us,");
   for (unsigned int i = 0; i < 19U; i++) {
     fprintf(file, "nn_in_%s_raw,", nn_cfc_input_names[i]);
   }
@@ -128,6 +132,10 @@ static void logger_file_write_header(FILE *file) {
   fprintf(file, "rl_target_x,rl_target_y,rl_target_z,");
   fprintf(file, "rl_err_x,rl_err_y,rl_err_z,");
   fprintf(file, "rl_dist,rl_mean_policy_rpm,rl_raw_mean_rpm,");
+  fprintf(file, "rl_mext_mode,rl_mext_est_x,rl_mext_est_y,rl_mext_est_z,");
+  fprintf(file, "rl_mext_measured_x,rl_mext_measured_y,rl_mext_measured_z,");
+  fprintf(file, "rl_mext_modeled_x,rl_mext_modeled_y,rl_mext_modeled_z,");
+  fprintf(file, "rl_mext_filtered_p,rl_mext_filtered_q,rl_mext_filtered_r,rl_mext_time_us,");
   for (unsigned int i = 0; i < 20U; i++) {
     fprintf(file, "rl_obs_%u,", i);
   }
@@ -245,6 +253,24 @@ static void logger_file_write_row(FILE *file) {
       nn_cfc_control_dist_to_target,
       nn_cfc_control_dist_xy_to_target,
       nn_cfc_control_abs_z_error);
+  fprintf(file, "%u,%f,%f,%f,",
+      (unsigned int)nn_cfc_control_mext_mode,
+      nn_cfc_control_external_moment_nm[0],
+      nn_cfc_control_external_moment_nm[1],
+      nn_cfc_control_external_moment_nm[2]);
+  fprintf(file, "%f,%f,%f,",
+      nn_cfc_control_measured_moment_nm[0],
+      nn_cfc_control_measured_moment_nm[1],
+      nn_cfc_control_measured_moment_nm[2]);
+  fprintf(file, "%f,%f,%f,",
+      nn_cfc_control_modeled_moment_nm[0],
+      nn_cfc_control_modeled_moment_nm[1],
+      nn_cfc_control_modeled_moment_nm[2]);
+  fprintf(file, "%f,%f,%f,%u,",
+      nn_cfc_control_observer_filtered_rates[0],
+      nn_cfc_control_observer_filtered_rates[1],
+      nn_cfc_control_observer_filtered_rates[2],
+      nn_cfc_control_mext_time_us);
   for (unsigned int i = 0; i < 19U; i++) {
     fprintf(file, "%f,", nn_cfc_control_net_input_state[i]);
   }
@@ -298,6 +324,24 @@ static void logger_file_write_row(FILE *file) {
       rl_cfc_control_dist_to_target,
       rl_cfc_control_mean_policy_rpm,
       rl_cfc_control_raw_mean_rpm);
+  fprintf(file, "%u,%f,%f,%f,",
+      (unsigned int)rl_cfc_control_mext_mode,
+      rl_cfc_control_external_moment_nm[0],
+      rl_cfc_control_external_moment_nm[1],
+      rl_cfc_control_external_moment_nm[2]);
+  fprintf(file, "%f,%f,%f,",
+      rl_cfc_control_measured_moment_nm[0],
+      rl_cfc_control_measured_moment_nm[1],
+      rl_cfc_control_measured_moment_nm[2]);
+  fprintf(file, "%f,%f,%f,",
+      rl_cfc_control_modeled_moment_nm[0],
+      rl_cfc_control_modeled_moment_nm[1],
+      rl_cfc_control_modeled_moment_nm[2]);
+  fprintf(file, "%f,%f,%f,%u,",
+      rl_cfc_control_observer_filtered_rates[0],
+      rl_cfc_control_observer_filtered_rates[1],
+      rl_cfc_control_observer_filtered_rates[2],
+      rl_cfc_control_mext_time_us);
   for (unsigned int i = 0; i < 20U; i++) {
     fprintf(file, "%f,", rl_cfc_control_obs[i]);
   }

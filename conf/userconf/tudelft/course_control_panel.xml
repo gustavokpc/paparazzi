@@ -14,7 +14,7 @@
       <program name="UnifiedMoCap">
         <arg flag="optitrack"/>
         <arg flag="ivy"/>
-        <arg flag="--publish_frequency" constant="10"/>
+        <arg flag="--publish_divisor" constant="1"/>
         <arg flag="--coordinate_system" constant="enu"/>
         <arg flag="--coordinate_north" constant="far"/>
         <arg flag="--craft_noses" constant="right"/>
@@ -37,7 +37,7 @@
       <program name="UnifiedMoCap">
         <arg flag="optitrack"/>
         <arg flag="ivy"/>
-        <arg flag="--publish_frequency" constant="10"/>
+        <arg flag="--publish_divisor" constant="1"/>
         <arg flag="--coordinate_system" constant="enu"/>
         <arg flag="--coordinate_north" constant="far"/>
         <arg flag="--craft_noses" constant="right"/>

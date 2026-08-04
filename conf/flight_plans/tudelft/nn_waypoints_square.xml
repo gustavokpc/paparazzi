@@ -30,6 +30,11 @@
     <waypoint name="NN_SQ_2" x="2.0" y="-1.5" height="1.0"/>
     <waypoint name="NN_SQ_3" x="-2.0" y="-1.5" height="1.0"/>
     <waypoint name="NN_SQ_4" x="-2.0" y="1.5" height="1.0"/>
+    <!-- Fixed NN targets selected by NN_CFC_START_WAYPOINT_INDEX 'H'/'X'/'Y'/'Z'. -->
+    <waypoint name="NN_H" x="0.0" y="0.0" height="1.0"/>
+    <waypoint name="NN_X" x="1.5" y="0.0" height="1.0"/>
+    <waypoint name="NN_Y" x="0.0" y="1.5" height="1.0"/>
+    <waypoint name="NN_Z" x="0.0" y="0.0" height="2.0"/>
     <waypoint name="_CZ1" x="-5.0" y="-5.0"/>
     <waypoint name="_CZ2" x="-5.0" y="5.0"/>
     <waypoint name="_CZ3" x="5.0" y="5.0"/>

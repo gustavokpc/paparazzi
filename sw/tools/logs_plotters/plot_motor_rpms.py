@@ -182,7 +182,51 @@ def plot_rpms(rows, sources, title, output, show, reset_time):
         if plotted and len(sources) > 1:
             axis.legend(loc="upper right")
 
-    axes[-1].set_xlabel("time from active segment start [s]" if reset_time else "time [s]")
+    axes[-1].set_xlabel("time from plotted segment start [s]" if reset_time else "time [s]")
+    hz = observed_hz([row["time"] for row in rows])
+    hz_text = f" | observed {hz:.2f} Hz" if hz else ""
+    fig.suptitle(f"{title}{hz_text}")
+    fig.tight_layout(rect=(0, 0, 1, 0.97))
+
+    if output:
+        fig.savefig(output, dpi=160)
+        print(f"Saved RPM plot to {output}")
+    if show:
+        plt.show()
+    plt.close(fig)
+
+
+def plot_rpms_separate(rows, sources, title, output, show, reset_time):
+    """Plot one panel per motor and source (four motors x N sources)."""
+    first_time = rows[0]["time"] if reset_time else 0.0
+    times = [row["time"] - first_time for row in rows]
+    fig, axes = plt.subplots(
+        4,
+        len(sources),
+        figsize=(6 * len(sources), 9),
+        sharex=True,
+        squeeze=False,
+    )
+    colors = {
+        "cmd": "tab:blue",
+        "obs": "tab:orange",
+        "ref": "tab:green",
+        "nn-input": "tab:orange",
+    }
+
+    for motor_index in range(4):
+        for source_index, source in enumerate(sources):
+            axis = axes[motor_index][source_index]
+            field = SOURCES[source][motor_index]
+            values = [row.get(field) for row in rows]
+            axis.plot(times, values, color=colors[source], linewidth=1.2)
+            axis.set_ylabel(f"Motor {motor_index + 1}\nRPM")
+            axis.set_title(SOURCE_LABELS[source] if motor_index == 0 else "")
+            axis.grid(True, alpha=0.3)
+
+    x_label = "time from plotted segment start [s]" if reset_time else "time [s]"
+    for axis in axes[-1]:
+        axis.set_xlabel(x_label)
     hz = observed_hz([row["time"] for row in rows])
     hz_text = f" | observed {hz:.2f} Hz" if hz else ""
     fig.suptitle(f"{title}{hz_text}")
@@ -238,7 +282,8 @@ def analyze_one(path, args):
         print("Active RPM trimming disabled.")
     else:
         print("No active RPM segment detected; plotting the full log.")
-    plot_rpms(
+    plot_function = plot_rpms_separate if args.separate_sources else plot_rpms
+    plot_function(
         rows,
         sources,
         f"Motor RPMs ({source_text})",
@@ -304,6 +349,11 @@ def main():
         "--absolute-time",
         action="store_true",
         help="keep original log timestamps on the x-axis instead of resetting the active segment to 0",
+    )
+    parser.add_argument(
+        "--separate-sources",
+        action="store_true",
+        help="use one subplot per motor and source instead of overlaying sources",
     )
     parser.add_argument("--show", action="store_true", help="open an interactive matplotlib window")
     args = parser.parse_args()

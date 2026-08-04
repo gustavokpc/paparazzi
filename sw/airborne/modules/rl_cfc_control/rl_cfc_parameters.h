@@ -2,8 +2,10 @@
 #define RL_CFC_PARAMETERS_H
 
 /* Exact deterministic actor export from:
- * recurrent_ppo_figure8_gates_ckpt_96000000_steps.zip
- * configured for a 100 Hz controller (CfC timespan = 0.01 s).
+ * recurrent_ppo_figure8_gates_correct_yaw_tau_001_noise_pqr2_51200000_steps.zip
+ * Compatible with the current Paparazzi rl_cfc_control wrapper:
+ * 20 raw observations, 64-value CfC hidden state, four [0, 1] actions,
+ * and a 100 Hz recurrent timestep (CfC timespan = 0.01 s).
  */
 #define NUM_STATES 20
 #define NUM_CONTROLS 4

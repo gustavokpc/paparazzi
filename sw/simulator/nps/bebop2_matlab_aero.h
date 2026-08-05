@@ -2,12 +2,9 @@
 #define BEBOP2_MATLAB_AERO_H
 
 /*
- * Header-only port of
- * LNN_behavioural_cloning_quadrotor/utils/dynamics_models/
- * quadrotor_sim_matlab.py::forces_moments().
- *
- * This file deliberately has no Gazebo or Paparazzi dependencies so the
- * numerical model can be regression-tested against Python.
+ * Self-contained Bebop 2 aerodynamic force and moment model.
+ * All coefficients and calculations needed by Gazebo are embedded here;
+ * no external Python or neural-network project is required at runtime.
  */
 
 #include <algorithm>

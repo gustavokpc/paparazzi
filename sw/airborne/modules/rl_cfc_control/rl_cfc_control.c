@@ -43,6 +43,10 @@
 #include "mcu_periph/sys_time.h"
 #include "modules/actuators/motor_mixing.h"
 #include "modules/nav/waypoints.h"
+#include "firmwares/rotorcraft/guidance/guidance_h.h"
+#include "firmwares/rotorcraft/guidance/guidance_pid.h"
+#include "firmwares/rotorcraft/guidance/guidance_v.h"
+#include "firmwares/rotorcraft/stabilization/stabilization_attitude.h"
 
 /*
  * Low-pass filter applied only to the p/q/r observations consumed by the RL
@@ -838,6 +842,50 @@ void rl_cfc_control_stop(void)
   reset_mext_observer_state();
   rl_cfc_reset_horizontal_observation_hold();
   rl_cfc_reset();
+}
+
+void rl_cfc_control_prepare_landing(void)
+{
+  /*
+   * The normal guidance and stabilization loops keep running while RL
+   * overwrites their motor commands. Clear their accumulated state before
+   * returning motor authority, otherwise the first NAV command can saturate.
+   */
+  rl_cfc_control_stop();
+  guidance_h_nav_enter();
+  guidance_pid_set_h_igain((uint32_t)guidance_pid.ki);
+  guidance_v_z_enter();
+  guidance_v_notify_in_flight(true);
+  stabilization_attitude_enter();
+}
+
+bool rl_cfc_landing_approach_stable(void)
+{
+  const struct EnuCoor_f *pos = stateGetPositionEnu_f();
+  const struct EnuCoor_f *speed = stateGetSpeedEnu_f();
+  return hypotf(pos->x, pos->y) < 0.15f &&
+         fabsf(pos->z - 1.0f) < 0.15f &&
+         hypotf(speed->x, speed->y) < 0.15f &&
+         fabsf(speed->z) < 0.10f;
+}
+
+bool rl_cfc_landing_recovery_stable(void)
+{
+  const struct EnuCoor_f *pos = stateGetPositionEnu_f();
+  const struct EnuCoor_f *speed = stateGetSpeedEnu_f();
+#ifdef WP_LAND_BRAKE
+  const float dx = pos->x - waypoint_get_x(WP_LAND_BRAKE);
+  const float dy = pos->y - waypoint_get_y(WP_LAND_BRAKE);
+  const float dz = pos->z - waypoint_get_alt(WP_LAND_BRAKE);
+  return hypotf(dx, dy) < 0.25f &&
+         fabsf(dz) < 0.15f &&
+         hypotf(speed->x, speed->y) < 0.25f &&
+         fabsf(speed->z) < 0.15f;
+#else
+  return pos->z > 0.9f &&
+         hypotf(speed->x, speed->y) < 0.25f &&
+         fabsf(speed->z) < 0.15f;
+#endif
 }
 
 void rl_cfc_control_periodic(void)

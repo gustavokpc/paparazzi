@@ -20,7 +20,8 @@
 
     <target name="nps" board="pc">
       <module name="fdm" type="gazebo"/>
-      <define name="LOGGER_FILE_PATH" value="/home/pprz/paparazzi/var/log/nn_cfc_control"/>
+      <!-- Relative to the Paparazzi repository, both for native and Docker NPS runs. -->
+      <define name="LOGGER_FILE_PATH" value="var/log/nn_cfc_control"/>
       <module name="ahrs" type="float_mlkf">
         <configure name="USE_MAGNETOMETER" value="FALSE"/>
         <define name="AHRS_USE_GPS_HEADING" value="TRUE"/>

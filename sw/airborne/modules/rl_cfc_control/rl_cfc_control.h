@@ -43,6 +43,9 @@ extern float rl_cfc_control_dist_to_target;
 void rl_cfc_control_init(void);
 void rl_cfc_control_start(void);
 void rl_cfc_control_stop(void);
+void rl_cfc_control_prepare_landing(void);
+bool rl_cfc_landing_approach_stable(void);
+bool rl_cfc_landing_recovery_stable(void);
 void rl_cfc_control_periodic(void);
 void rl_cfc_control_apply_motor_rpm(bool motors_on);
 

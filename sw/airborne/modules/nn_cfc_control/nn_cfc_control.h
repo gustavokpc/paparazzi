@@ -5,6 +5,9 @@
 #include <stdint.h>
 
 extern bool nn_cfc_control_enabled;
+extern bool nn_cfc_control_intermediate_active;
+extern bool nn_cfc_control_intermediate_complete;
+extern float nn_cfc_control_blend_alpha;
 extern unsigned int nn_cfc_control_waypoint_index;
 extern float nn_cfc_control_last_norm[4];
 extern float nn_cfc_control_last_rpm[4];
@@ -46,7 +49,12 @@ extern float nn_cfc_control_log_values[38];
 
 void nn_cfc_control_init(void);
 void nn_cfc_control_start(void);
+void nn_cfc_control_start_intermediate(void);
 void nn_cfc_control_stop(void);
+void nn_cfc_control_prepare_landing(void);
+bool nn_cfc_control_intermediate_is_complete(void);
+bool nn_cfc_landing_approach_stable(void);
+bool nn_cfc_landing_recovery_stable(void);
 void nn_cfc_control_periodic(void);
 void nn_cfc_control_apply_motor_rpm(bool motors_on);
 

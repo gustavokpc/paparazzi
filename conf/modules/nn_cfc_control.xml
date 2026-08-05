@@ -14,6 +14,9 @@
     <dl_settings>
       <dl_settings name="NN CFC">
         <dl_setting var="nn_cfc_control_enabled" min="0" step="1" max="1" shortname="enabled" values="FALSE|TRUE" type="bool" module="modules/nn_cfc_control/nn_cfc_control"/>
+        <dl_setting var="nn_cfc_control_intermediate_active" min="0" step="1" max="1" shortname="blend_on" values="FALSE|TRUE" type="bool"/>
+        <dl_setting var="nn_cfc_control_intermediate_complete" min="0" step="1" max="1" shortname="blend_done" values="FALSE|TRUE" type="bool"/>
+        <dl_setting var="nn_cfc_control_blend_alpha" min="0" step="0.01" max="1" shortname="blend" type="float"/>
         <dl_setting var="nn_cfc_control_periodic_count" min="0" step="1" max="1000000" shortname="periodic" type="uint32"/>
         <dl_setting var="nn_cfc_control_periodic_dt_us" min="0" step="1" max="1000000" shortname="dt_us" type="uint32"/>
         <dl_setting var="nn_cfc_control_sensor_read_time_us" min="0" step="1" max="1000000" shortname="sense_us" type="uint32"/>

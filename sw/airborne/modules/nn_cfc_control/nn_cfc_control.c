@@ -33,7 +33,7 @@
 #define OFF 0
 #define BACKGROUND 1
 #define ON 2
-#define NN_CFC_MEXT_MODE ON /* Change here the mode of MEXT */
+#define NN_CFC_MEXT_MODE BACKGROUND /* Change here the mode of MEXT */
 
 #if NN_CFC_MEXT_MODE != OFF && NN_CFC_MEXT_MODE != BACKGROUND && NN_CFC_MEXT_MODE != ON
 #error "NN_CFC_MEXT_MODE must be OFF, BACKGROUND, or ON"
@@ -51,7 +51,7 @@
  * second-order Butterworth type used by the external-moment observer. The
  * input filter owns separate state, so it does not depend on the Mext mode.
  */
-#define NN_CFC_RATE_FILTER_ENABLED 1
+#define NN_CFC_RATE_FILTER_ENABLED 0
 #define NN_CFC_RATE_FILTER_CUTOFF_HZ 10.0f
 #define NN_CFC_RATE_FILTER_FIRST_ORDER 1
 #define NN_CFC_RATE_FILTER_BUTTERWORTH 2
@@ -94,7 +94,12 @@
 #include "generated/flight_plan.h"
 #include "generated/modules.h"
 #include "mcu_periph/sys_time.h"
+#include "modules/actuators/actuators.h"
 #include "modules/nav/waypoints.h"
+#include "firmwares/rotorcraft/guidance/guidance_h.h"
+#include "firmwares/rotorcraft/guidance/guidance_pid.h"
+#include "firmwares/rotorcraft/guidance/guidance_v.h"
+#include "firmwares/rotorcraft/stabilization/stabilization_attitude.h"
 
 #ifdef SITL
 #include <sys/time.h>
@@ -140,7 +145,22 @@
 #endif
 
 #ifndef NN_CFC_START_WAYPOINT_INDEX
-#define NN_CFC_START_WAYPOINT_INDEX 'H' /* 0, 1, 2, 3 (3 is the default for square), 'H', 'X', 'Y', 'Z' */
+#define NN_CFC_START_WAYPOINT_INDEX 'X' /* 0, 1, 2, 3 (3 is the default for square), 'H', 'X', 'Y', 'Z' */
+#endif
+
+#ifndef NN_CFC_INTERMEDIATE_DURATION_S
+#define NN_CFC_INTERMEDIATE_DURATION_S 5.0f
+#endif
+
+/*
+ * In NPS, the stock Gazebo plant interprets the actuator signal as normalized
+ * thrust, while the Matlab aerodynamic plant interprets it as RPM / 10000.
+ * 11590.483 RPM produces the same 2.80 N as a full-scale stock actuator at
+ * zero airspeed. This conversion prevents a thrust step when intermediate
+ * control enables the Matlab plant at alpha = 0.
+ */
+#ifndef NN_CFC_NPS_STOCK_FULL_THRUST_EQUIVALENT_RPM
+#define NN_CFC_NPS_STOCK_FULL_THRUST_EQUIVALENT_RPM 11590.483f
 #endif
 
 /*
@@ -270,6 +290,9 @@ static void nn_cfc_filter_rate_inputs(float net_state[NUM_STATES])
 #endif
 
 bool nn_cfc_control_enabled = false;
+bool nn_cfc_control_intermediate_active = false;
+bool nn_cfc_control_intermediate_complete = false;
+float nn_cfc_control_blend_alpha = 0.f;
 unsigned int nn_cfc_control_waypoint_index = 0;
 float nn_cfc_control_last_norm[4] = {0.f, 0.f, 0.f, 0.f};
 float nn_cfc_control_last_rpm[4] = {0.f, 0.f, 0.f, 0.f};
@@ -310,6 +333,7 @@ float nn_cfc_control_net_input_normalized[19] = {0.f};
 float nn_cfc_control_log_values[38] = {0.f};
 static float nn_cfc_control_timing_values[4] = {0.f, 0.f, 0.f, 0.f};
 static uint32_t nn_cfc_control_last_periodic_start_us = 0U;
+static uint32_t nn_cfc_control_intermediate_start_us = 0U;
 
 static bool nn_cfc_control_has_autonomous_authority(void)
 {
@@ -508,7 +532,11 @@ static void update_sim_motor_feedback_rpm(void)
   const float alpha = clampf(1.f - expf(-dt / tau), 0.f, 1.f);
 
   for (uint8_t i = 0U; i < 4U; i++) {
-    const float rpm_target = clampf(nn_cfc_control_last_rpm[i], NN_CFC_MIN_RPM, NN_CFC_MAX_RPM);
+    const uint8_t phys_idx = nn_cfc_net_to_phys_motor[i];
+    const float commanded_rpm = nn_cfc_control_applied_rpm_cmd[phys_idx] > 0
+                                    ? (float)nn_cfc_control_applied_rpm_cmd[phys_idx]
+                                    : nn_cfc_control_last_rpm[i];
+    const float rpm_target = clampf(commanded_rpm, NN_CFC_MIN_RPM, NN_CFC_MAX_RPM);
     nn_cfc_control_sim_rpm_est[i] += alpha * (rpm_target - nn_cfc_control_sim_rpm_est[i]);
   }
 }
@@ -625,6 +653,25 @@ static void apply_motor_rpm(uint8_t motor_idx, int32_t rpm)
 #endif
 }
 
+static int32_t get_autopilot_motor_rpm(uint8_t motor_idx)
+{
+#if NN_CFC_HAS_BEBOP_ACTUATORS
+  /* ActuatorSet has already converted the normal mixer output to Bebop RPM units. */
+  return actuator_get(motor_idx);
+#else
+  /*
+   * Preserve the thrust produced by the standard controller across the NPS
+   * plant switch. Rotor thrust is proportional to RPM squared, hence sqrt(u).
+   * Read pprz_val because it still contains the standard mixer command here;
+   * apply_motor_rpm() overwrites only the NPS transport command afterwards.
+   */
+  const float stock_normalized_thrust = clampf(
+      (float)actuators[motor_idx].pprz_val / (float)MAX_PPRZ, 0.f, 1.f);
+  return (int32_t)(NN_CFC_NPS_STOCK_FULL_THRUST_EQUIVALENT_RPM *
+                   sqrtf(stock_normalized_thrust) + 0.5f);
+#endif
+}
+
 static float waypoint_dist2(const nn_vec3_t pos, const nn_vec3_t wp)
 {
   const float dx = wp.x - pos.x;
@@ -711,6 +758,10 @@ void nn_cfc_control_init(void)
 {
   /* Module initialization: clear all exported state and reset CFC memory. */
   nn_cfc_control_enabled = false;
+  nn_cfc_control_intermediate_active = false;
+  nn_cfc_control_intermediate_complete = false;
+  nn_cfc_control_blend_alpha = 0.f;
+  nn_cfc_control_intermediate_start_us = 0U;
   nn_cfc_control_waypoint_index = 0U;
   nn_cfc_control_periodic_count = 0U;
   nn_cfc_control_periodic_dt_us = 0U;
@@ -775,12 +826,35 @@ void nn_cfc_control_start(void)
     return;
   }
 
+  /* Keep the warmed-up recurrent state when intermediate hands off to NN square. */
+  if (nn_cfc_control_enabled &&
+      (nn_cfc_control_intermediate_active || nn_cfc_control_intermediate_complete)) {
+    nn_cfc_control_intermediate_active = false;
+    nn_cfc_control_intermediate_complete = false;
+    nn_cfc_control_blend_alpha = 1.f;
+    nn_cfc_control_intermediate_start_us = 0U;
+    /*
+     * Intermediate deliberately forces H. At the handoff, restore the normal
+     * NN-square start selector just as a direct NN-square activation does.
+     * Without this, the GCS changes block but the network keeps commanding H
+     * until NN square is clicked a second time.
+     */
+    nn_cfc_control_waypoint_index = normalize_waypoint_selector(NN_CFC_START_WAYPOINT_INDEX);
+    update_target_debug(nn_cfc_get_position_m(),
+                        get_selected_waypoint(nn_cfc_control_waypoint_index));
+    return;
+  }
+
   /*
    * Start is called by the flight plan. Resetting the recurrent state here is
    * important because the CFC hidden state should not carry stale information
    * from a previous manual/standby segment.
    */
   nn_cfc_control_enabled = true;
+  nn_cfc_control_intermediate_active = false;
+  nn_cfc_control_intermediate_complete = false;
+  nn_cfc_control_blend_alpha = 1.f;
+  nn_cfc_control_intermediate_start_us = 0U;
   nn_cfc_control_periodic_count = 0U;
   nn_cfc_control_periodic_dt_us = 0U;
   nn_cfc_control_sensor_read_time_us = 0U;
@@ -815,10 +889,30 @@ void nn_cfc_control_start(void)
 #endif
 }
 
+void nn_cfc_control_start_intermediate(void)
+{
+  /* Reset the network exactly as a direct activation, then start at zero NN authority. */
+  nn_cfc_control_start();
+  if (!nn_cfc_control_enabled) {
+    return;
+  }
+
+  nn_cfc_control_waypoint_index = NN_CFC_WAYPOINT_H;
+  nn_cfc_control_intermediate_active = true;
+  nn_cfc_control_intermediate_complete = false;
+  nn_cfc_control_blend_alpha = 0.f;
+  nn_cfc_control_intermediate_start_us = nn_cfc_timing_now_usec();
+  update_target_debug(nn_cfc_get_position_m(), get_fixed_waypoint(NN_CFC_WAYPOINT_H));
+}
+
 void nn_cfc_control_stop(void)
 {
   /* Stop neural control and return future command_law calls to autopilot. */
   nn_cfc_control_enabled = false;
+  nn_cfc_control_intermediate_active = false;
+  nn_cfc_control_intermediate_complete = false;
+  nn_cfc_control_blend_alpha = 0.f;
+  nn_cfc_control_intermediate_start_us = 0U;
   nn_cfc_control_periodic_dt_us = 0U;
   nn_cfc_control_sensor_read_time_us = 0U;
   nn_cfc_control_inference_time_us = 0U;
@@ -841,6 +935,55 @@ void nn_cfc_control_stop(void)
   NN_NET_RESET();
 }
 
+void nn_cfc_control_prepare_landing(void)
+{
+  /*
+   * The normal guidance and stabilization loops keep running while the NN
+   * overwrites their motor commands. Clear their accumulated state before
+   * returning motor authority, otherwise the first NAV command can saturate.
+   */
+  nn_cfc_control_stop();
+  guidance_h_nav_enter();
+  guidance_pid_set_h_igain((uint32_t)guidance_pid.ki);
+  guidance_v_z_enter();
+  guidance_v_notify_in_flight(true);
+  stabilization_attitude_enter();
+}
+
+bool nn_cfc_control_intermediate_is_complete(void)
+{
+  return nn_cfc_control_intermediate_complete;
+}
+
+bool nn_cfc_landing_approach_stable(void)
+{
+  const struct EnuCoor_f *pos = stateGetPositionEnu_f();
+  const struct EnuCoor_f *speed = stateGetSpeedEnu_f();
+  return hypotf(pos->x, pos->y) < 0.15f &&
+         fabsf(pos->z - 1.0f) < 0.15f &&
+         hypotf(speed->x, speed->y) < 0.15f &&
+         fabsf(speed->z) < 0.10f;
+}
+
+bool nn_cfc_landing_recovery_stable(void)
+{
+  const struct EnuCoor_f *pos = stateGetPositionEnu_f();
+  const struct EnuCoor_f *speed = stateGetSpeedEnu_f();
+#ifdef WP_LAND_BRAKE
+  const float dx = pos->x - waypoint_get_x(WP_LAND_BRAKE);
+  const float dy = pos->y - waypoint_get_y(WP_LAND_BRAKE);
+  const float dz = pos->z - waypoint_get_alt(WP_LAND_BRAKE);
+  return hypotf(dx, dy) < 0.25f &&
+         fabsf(dz) < 0.15f &&
+         hypotf(speed->x, speed->y) < 0.25f &&
+         fabsf(speed->z) < 0.15f;
+#else
+  return pos->z > 0.9f &&
+         hypotf(speed->x, speed->y) < 0.25f &&
+         fabsf(speed->z) < 0.15f;
+#endif
+}
+
 void nn_cfc_control_periodic(void)
 {
   if (!nn_cfc_control_enabled) {
@@ -852,6 +995,16 @@ void nn_cfc_control_periodic(void)
   }
 
   const uint32_t periodic_start_us = nn_cfc_timing_now_usec();
+  if (nn_cfc_control_intermediate_active) {
+    const uint32_t elapsed_us = periodic_start_us - nn_cfc_control_intermediate_start_us;
+    nn_cfc_control_blend_alpha = clampf(
+        (float)elapsed_us * 1.0e-6f / NN_CFC_INTERMEDIATE_DURATION_S, 0.f, 1.f);
+    if (nn_cfc_control_blend_alpha >= 1.f) {
+      nn_cfc_control_intermediate_active = false;
+      nn_cfc_control_intermediate_complete = true;
+      nn_cfc_control_blend_alpha = 1.f;
+    }
+  }
   if (nn_cfc_control_last_periodic_start_us != 0U) {
     nn_cfc_control_periodic_dt_us = periodic_start_us - nn_cfc_control_last_periodic_start_us;
   } else {
@@ -870,7 +1023,11 @@ void nn_cfc_control_periodic(void)
    */
   const uint32_t sensor_read_start_us = nn_cfc_timing_now_usec();
   const nn_vec3_t pos = nn_cfc_get_position_m();
-  maybe_advance_waypoint(pos);
+  if (nn_cfc_control_intermediate_active || nn_cfc_control_intermediate_complete) {
+    update_target_debug(pos, get_fixed_waypoint(NN_CFC_WAYPOINT_H));
+  } else {
+    maybe_advance_waypoint(pos);
+  }
   const nn_vec3_t vel = nn_cfc_get_velocity_mps();
   const nn_vec3_t err = {
     nn_cfc_control_error[0],
@@ -1020,7 +1177,18 @@ void nn_cfc_control_apply_motor_rpm(bool motors_on)
   update_motor_command_debug();
   for (uint8_t i = 0U; i < 4U; i++) {
     const uint8_t phys_idx = nn_cfc_net_to_phys_motor[i];
-    const int32_t rpm = rpm_to_command(nn_cfc_control_last_rpm[i]);
+    const int32_t nn_rpm = rpm_to_command(nn_cfc_control_last_rpm[i]);
+    float applied_rpm = (float)nn_rpm;
+    if (nn_cfc_control_intermediate_active) {
+      const float ap_rpm = (float)get_autopilot_motor_rpm(phys_idx);
+      applied_rpm = (1.f - nn_cfc_control_blend_alpha) * ap_rpm +
+                    nn_cfc_control_blend_alpha * (float)nn_rpm;
+    }
+#if NN_CFC_HAS_BEBOP_ACTUATORS
+    const int32_t rpm = (int32_t)clampf(applied_rpm, 0.f, 12000.f);
+#else
+    const int32_t rpm = (int32_t)clampf(applied_rpm, 0.f, NN_CFC_MAX_RPM);
+#endif
     nn_cfc_control_applied_rpm_cmd[phys_idx] = rpm;
     apply_motor_rpm(phys_idx, rpm);
   }

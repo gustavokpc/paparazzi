@@ -24,6 +24,8 @@
     <waypoint name="CLIMB" x="1.9" y="1.0" height="1.0"/>
     <waypoint name="STDBY" x="1.9" y="1.0" height="1.0"/>
     <waypoint name="TD" x="0.8" y="-1.7" height="0.5"/>
+    <waypoint name="LAND_BRAKE" x="0.0" y="0.0" height="1.2"/>
+    <waypoint name="LAND_APPROACH" x="0.0" y="0.0" height="1.0"/>
     <waypoint name="GOAL" x="1.9" y="1.0"/>
     <waypoint name="TRAJECTORY" x="1.9" y="1.0"/>
     <!-- RL figure-eight gates. Coordinates are Paparazzi ENU converted from RL [x,y,z_down] as [y,x,-z]. -->
@@ -186,11 +188,31 @@
     </block>
 
     <block key="l" name="land here" strip_button="Land Here" strip_icon="land-right.png">
+      <call_once fun="NavSetWaypointHere(WP_LAND_BRAKE)"/>
+      <call_once fun="rl_cfc_control_prepare_landing()"/>
+      <call_once fun="setNav()"/>
+      <stay wp="LAND_BRAKE" max_speed="0.25" until="rl_cfc_landing_recovery_stable()"/>
+      <stay wp="LAND_APPROACH" max_speed="0.35" until="rl_cfc_landing_approach_stable()"/>
+      <deroute block="Landing settle"/>
+    </block>
+
+    <block name="Landing settle">
       <call_once fun="rl_cfc_control_stop()"/>
       <call_once fun="setNav()"/>
-      <call_once fun="NavSetWaypointHere(WP_TD)"/>
-      <go wp="TD"/>
-      <deroute block="Flare"/>
+      <exception cond="!rl_cfc_landing_approach_stable()" deroute="land here"/>
+      <stay wp="LAND_APPROACH" max_speed="0.20" until="stage_time @GEQ 2"/>
+      <deroute block="Controlled descent"/>
+    </block>
+
+    <block name="Controlled descent">
+      <call_once fun="rl_cfc_control_stop()"/>
+      <call_once fun="setNav()"/>
+      <call_once fun="NavStartDetectGround()"/>
+      <exception cond="NavDetectGround()" deroute="Holding point"/>
+      <exception cond="!nav_is_in_flight()" deroute="Landed"/>
+      <exception cond="0.10 @GT GetPosAlt()" deroute="Landed"/>
+      <stay climb="-0.15" vmode="climb" wp="LAND_APPROACH" max_speed="0.20" until="GetPosAlt() @LT 0.45"/>
+      <stay climb="-0.05" vmode="climb" wp="LAND_APPROACH" max_speed="0.20"/>
     </block>
     <block name="Land">
       <exception cond="0.55 @GEQ GetPosAlt()" deroute="Flare"/>

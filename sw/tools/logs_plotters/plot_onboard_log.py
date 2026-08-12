@@ -23,6 +23,11 @@ RPM_CMD_COLS = [f"rpm_cmd{i}" for i in range(1, 5)]
 NET_OUT_COLS = [f"network_out{i}_norm" for i in range(1, 5)]
 CMD_COLS = ["cmd_thrust", "cmd_roll", "cmd_pitch", "cmd_yaw"]
 PALETTE = ["#2166ac", "#b2182b", "#1b7837", "#984ea3", "#e08214", "#542788"]
+RL_GATE_YAWS = np.asarray([
+    0.5 * np.pi, np.pi, 0.5 * np.pi, 0.0,
+    -0.5 * np.pi, -np.pi, -0.5 * np.pi, 0.0,
+])
+RL_GATE_HALF_SIZE_M = 0.75
 
 
 def parse_float(value):
@@ -147,7 +152,14 @@ def plot_rpm_commands_2x2(output_path, title, data, xlim):
 
 
 def plot_rpm_commanded_observed_4x2(output_path, title, data, xlim, command_columns):
-    """Plot one commanded and one observed RPM panel for each motor."""
+    """Plot commanded RPM beside the best available motor feedback signal.
+
+    Onboard logs contain measured ``rpm_obs_*`` values.  Gazebo logs do not
+    always expose those columns, but do contain the command after the
+    controller's output processing (``rpm_applied*`` or
+    ``rl_rpm_applied*``).  Supporting both formats keeps the standard plot set
+    usable for real and simulated runs.
+    """
     times = data["time"]
     mask = np.isfinite(times) & (times >= xlim[0]) & (times <= xlim[1])
     fig, axes = plt.subplots(
@@ -156,17 +168,31 @@ def plot_rpm_commanded_observed_4x2(output_path, title, data, xlim, command_colu
     )
     for index, command in enumerate(command_columns):
         motor = index + 1
-        observed = f"rpm_obs_{motor}"
+        feedback_candidates = [
+            f"rpm_obs_{motor}",
+            command.replace("cmd", "applied"),
+        ]
+        feedback = next(
+            (column for column in feedback_candidates if column in data),
+            None,
+        )
         axes[index, 0].plot(
             times[mask], data[command][mask],
             color=PALETTE[index % len(PALETTE)], lw=1.1,
         )
-        axes[index, 1].plot(
-            times[mask], data[observed][mask],
-            color=PALETTE[index % len(PALETTE)], lw=1.1,
-        )
+        if feedback is not None:
+            axes[index, 1].plot(
+                times[mask], data[feedback][mask],
+                color=PALETTE[index % len(PALETTE)], lw=1.1,
+            )
+        else:
+            axes[index, 1].text(
+                0.5, 0.5, "feedback unavailable", ha="center", va="center",
+                transform=axes[index, 1].transAxes,
+            )
         axes[index, 0].set_title(f"Motor {motor} — commanded ({command})")
-        axes[index, 1].set_title(f"Motor {motor} — observed ({observed})")
+        feedback_label = feedback if feedback is not None else "unavailable"
+        axes[index, 1].set_title(f"Motor {motor} — feedback ({feedback_label})")
         axes[index, 0].set_ylabel(f"Motor {motor} [RPM]")
         for axis in axes[index]:
             axis.grid(True, alpha=0.25)
@@ -276,18 +302,203 @@ def title_with_label(path, suffix, title_label):
     return f"{title}\n{title_label}" if title_label else title
 
 
-def plot_rl_trajectory(output_path, title, data, xlim):
+def analyze_rl_gate_passages(data, xlim):
+    """Recover RL gate crossings in the common ENU plotting frame.
+
+    ``logger_file`` records the generic position columns in NED, while the RL
+    target debug values are stored in Paparazzi ENU.  A waypoint-index change
+    is therefore checked after converting the logged position as
+    ``ENU = (pos_y, pos_x, -pos_z)``.
+    """
+    times = data["time"]
+    mask = (
+        np.isfinite(times)
+        & (times >= xlim[0])
+        & (times <= xlim[1])
+        & (data["rl_enabled"] > 0.5)
+    )
+    samples = np.flatnonzero(mask)
+    centers = {}
+    if samples.size == 0:
+        return {"samples": samples, "centers": centers, "events": []}
+
+    waypoint_indices = data["rl_waypoint_index"].astype(int)
+    for gate_index in range(len(RL_GATE_YAWS)):
+        gate_samples = samples[waypoint_indices[samples] == gate_index]
+        if gate_samples.size:
+            centers[gate_index] = np.asarray([
+                np.nanmedian(data["rl_target_x"][gate_samples]),
+                np.nanmedian(data["rl_target_y"][gate_samples]),
+                np.nanmedian(data["rl_target_z"][gate_samples]),
+            ])
+
+    events = []
+    for left, right in zip(samples[:-1], samples[1:]):
+        old_index = int(waypoint_indices[left])
+        new_index = int(waypoint_indices[right])
+        if old_index == new_index:
+            continue
+
+        center = np.asarray([
+            data["rl_target_x"][left],
+            data["rl_target_y"][left],
+            data["rl_target_z"][left],
+        ])
+        yaw = RL_GATE_YAWS[old_index % len(RL_GATE_YAWS)]
+
+        # Projection used by rl_cfc_control.c, evaluated in NED.
+        projection_left = (
+            (data["pos_x"][left] - center[1]) * np.cos(yaw)
+            + (data["pos_y"][left] - center[0]) * np.sin(yaw)
+        )
+        projection_right = (
+            (data["pos_x"][right] - center[1]) * np.cos(yaw)
+            + (data["pos_y"][right] - center[0]) * np.sin(yaw)
+        )
+        denominator = projection_right - projection_left
+        crossed_plane_in_log = projection_left <= 0.0 and projection_right >= 0.0
+        if crossed_plane_in_log and abs(denominator) > 1e-12:
+            alpha = float(-projection_left / denominator)
+            crossing_time = data["time"][left] + alpha * (data["time"][right] - data["time"][left])
+        else:
+            # The controller and logger both run periodically but are not phase
+            # aligned.  The index transition proves the control task saw the
+            # crossing; use the closest logged endpoint for aperture margins.
+            alpha = 0.0 if abs(projection_left) <= abs(projection_right) else 1.0
+            crossing_time = data["time"][right]
+
+        east = data["pos_y"][left] + alpha * (data["pos_y"][right] - data["pos_y"][left])
+        north = data["pos_x"][left] + alpha * (data["pos_x"][right] - data["pos_x"][left])
+        up = -(data["pos_z"][left] + alpha * (data["pos_z"][right] - data["pos_z"][left]))
+        crossing = np.asarray([east, north, up])
+
+        normal_error = (
+            (north - center[1]) * np.cos(yaw)
+            + (east - center[0]) * np.sin(yaw)
+        )
+        if not crossed_plane_in_log:
+            # Put the marker on the plane while keeping the closest sample's
+            # tangent and height coordinates.
+            crossing[0] -= normal_error * np.sin(yaw)
+            crossing[1] -= normal_error * np.cos(yaw)
+
+        # Gate tangent in ENU is (cos(yaw), -sin(yaw)).
+        tangent_error = (
+            (east - center[0]) * np.cos(yaw)
+            - (north - center[1]) * np.sin(yaw)
+        )
+        height_error = up - center[2]
+        within_opening = (
+            abs(tangent_error) < RL_GATE_HALF_SIZE_M
+            and abs(height_error) < RL_GATE_HALF_SIZE_M
+            and abs(normal_error) < RL_GATE_HALF_SIZE_M
+        )
+        expected_advance = new_index == (old_index + 1) % len(RL_GATE_YAWS)
+        # maybe_advance_waypoint() changes the index only after the gate-plane
+        # crossing and the 1.5 m opening test both succeed.  The nearest logged
+        # sample supplies an additional geometric consistency check.
+        passed = bool(within_opening and expected_advance)
+        events.append({
+            "gate_index": old_index,
+            "next_index": new_index,
+            "time": float(crossing_time),
+            "position_enu": crossing,
+            "center_enu": center,
+            "tangent_error": float(tangent_error),
+            "height_error": float(height_error),
+            "normal_error": float(normal_error),
+            "plane_crossing_sampled": bool(crossed_plane_in_log),
+            "passed": passed,
+        })
+
+    return {"samples": samples, "centers": centers, "events": events}
+
+
+def plot_rl_trajectory(output_path, title, data, xlim, gate_analysis):
     times = data["time"]
     mask = np.isfinite(times) & (times >= xlim[0]) & (times <= xlim[1])
     fig, axis = plt.subplots(figsize=(9, 8), constrained_layout=True)
-    axis.plot(data["pos_x"][mask], data["pos_y"][mask], lw=1.2, label="position")
-    if "rl_target_x" in data and "rl_target_y" in data:
-        axis.plot(data["rl_target_x"][mask], data["rl_target_y"][mask], "--", lw=1.0, label="target")
-    axis.set_xlabel("x [m]")
-    axis.set_ylabel("y [m]")
-    axis.set_aspect("equal", adjustable="datalim")
+    east = data["pos_y"][mask]
+    north = data["pos_x"][mask]
+    axis.plot(east, north, lw=1.5, color="#2166ac", label="trajetória (ENU)")
+
+    centers = gate_analysis["centers"]
+    events = gate_analysis["events"]
+    passed_indices = {event["gate_index"] for event in events if event["passed"]}
+    for gate_index, center in sorted(centers.items()):
+        yaw = RL_GATE_YAWS[gate_index]
+        tangent = np.asarray([np.cos(yaw), -np.sin(yaw)])
+        endpoints = np.vstack([
+            center[:2] - RL_GATE_HALF_SIZE_M * tangent,
+            center[:2] + RL_GATE_HALF_SIZE_M * tangent,
+        ])
+        color = "#1b7837" if gate_index in passed_indices else "#d95f02"
+        label = "gate atravessado" if gate_index in passed_indices and gate_index == min(passed_indices) else None
+        axis.plot(endpoints[:, 0], endpoints[:, 1], color=color, lw=4.0, alpha=0.75, label=label)
+        axis.text(center[0], center[1], f" G{gate_index + 1}", color=color, fontsize=9)
+
+    if centers:
+        samples = gate_analysis["samples"]
+        target_order = [int(data["rl_waypoint_index"][samples[0]])]
+        target_order.extend(event["next_index"] for event in events)
+        target_points = np.asarray([centers[index][:2] for index in target_order if index in centers])
+        if target_points.size:
+            axis.plot(
+                target_points[:, 0], target_points[:, 1], "--o", color="#666666",
+                ms=3.5, lw=1.0, alpha=0.75, label="sequência de targets",
+            )
+
+    for event in events:
+        marker = "o" if event["passed"] else "x"
+        color = "#1b7837" if event["passed"] else "#b2182b"
+        axis.scatter(
+            event["position_enu"][0], event["position_enu"][1],
+            marker=marker, s=45, color=color, zorder=5,
+        )
+
+    if east.size:
+        axis.scatter(east[0], north[0], marker="^", s=70, color="#000000", label="início RL", zorder=6)
+        axis.scatter(east[-1], north[-1], marker="s", s=55, color="#984ea3", label="fim RL", zorder=6)
+    axis.set_xlabel("leste / x ENU [m]")
+    axis.set_ylabel("norte / y ENU [m]")
+    axis.set_aspect("equal", adjustable="box")
     axis.grid(True, alpha=0.25)
     axis.legend()
+    confirmed = sum(event["passed"] for event in events)
+    axis.set_title(f"{title}\n{confirmed} passagem(ns) de gate confirmada(s)")
+    fig.savefig(output_path, dpi=170)
+    plt.close(fig)
+
+
+def plot_rl_height(output_path, title, data, xlim, gate_analysis):
+    times = data["time"]
+    mask = np.isfinite(times) & (times >= xlim[0]) & (times <= xlim[1])
+    active_times = times[mask] - xlim[0]
+    height = -data["pos_z"][mask]
+    target_height = data["rl_target_z"][mask]
+
+    fig, axis = plt.subplots(figsize=(13, 6), constrained_layout=True)
+    axis.plot(active_times, height, color="#2166ac", lw=1.5, label="altura do drone (ENU)")
+    axis.plot(active_times, target_height, "--", color="#666666", lw=1.1, label="altura do target")
+    if target_height.size and np.any(np.isfinite(target_height)):
+        center_height = float(np.nanmedian(target_height))
+        axis.axhspan(
+            center_height - RL_GATE_HALF_SIZE_M,
+            center_height + RL_GATE_HALF_SIZE_M,
+            color="#1b7837", alpha=0.10, label="abertura vertical do gate",
+        )
+    for event in gate_analysis["events"]:
+        relative_time = event["time"] - xlim[0]
+        color = "#1b7837" if event["passed"] else "#b2182b"
+        axis.axvline(relative_time, color=color, lw=0.9, alpha=0.65)
+        axis.text(
+            relative_time, event["position_enu"][2], f" G{event['gate_index'] + 1}",
+            color=color, fontsize=8, rotation=90, va="bottom", ha="right",
+        )
+    axis.set_xlabel("tempo desde ativação do RL [s]")
+    axis.set_ylabel("altura / z ENU [m]")
+    axis.grid(True, alpha=0.25)
+    axis.legend(loc="best")
     axis.set_title(title)
     fig.savefig(output_path, dpi=170)
     plt.close(fig)
@@ -346,6 +557,8 @@ def generate_rl(path, output_base, threshold_rpm, pad_s, active_only=False,
     outputs = []
     plotted_intervals = intervals
     trajectory = None
+    height_plot = None
+    gate_analysis = None
     rpm_commanded_observed = None
     airborne_details = None
     if active_only:
@@ -377,6 +590,7 @@ def generate_rl(path, output_base, threshold_rpm, pad_s, active_only=False,
             (out_dir / f"{path.stem}_rl_timing_rl_active.png", timing_groups, xlim, "RL timing - RL active"),
         ]
         trajectory = out_dir / f"{path.stem}_trajectory_xy_rl_active.png"
+        height_plot = out_dir / f"{path.stem}_height_rl_active.png"
         rpm_commanded_observed = out_dir / f"{path.stem}_rpm_commanded_vs_observed_4x2_rl_active.png"
     else:
         outputs = [
@@ -402,9 +616,14 @@ def generate_rl(path, output_base, threshold_rpm, pad_s, active_only=False,
             plotted_intervals, xlim=xlim, active_label="RL active",
         )
     if trajectory is not None:
+        gate_analysis = analyze_rl_gate_passages(data, outputs[0][2])
         plot_rl_trajectory(
             trajectory, title_with_label(path, "XY trajectory - RL active", title_label),
-            data, outputs[0][2],
+            data, outputs[0][2], gate_analysis,
+        )
+        plot_rl_height(
+            height_plot, title_with_label(path, "height - RL active", title_label),
+            data, outputs[0][2], gate_analysis,
         )
     if rpm_commanded_observed is not None:
         comparison_xlim = outputs[0][2]
@@ -435,6 +654,25 @@ def generate_rl(path, output_base, threshold_rpm, pad_s, active_only=False,
         html.append(f"<h2>{suffix}</h2><img src=\"{output_path.name}\">")
     if trajectory is not None:
         html.append(f"<h2>XY trajectory</h2><img src=\"{trajectory.name}\">")
+    if height_plot is not None:
+        html.append(f"<h2>Height</h2><img src=\"{height_plot.name}\">")
+    if gate_analysis is not None:
+        confirmed_events = [event for event in gate_analysis["events"] if event["passed"]]
+        html.append(
+            f"<h2>Gate passage check</h2><p><strong>{len(confirmed_events)} "
+            "geometric crossing(s) confirmed.</strong></p><ul>"
+        )
+        for event in gate_analysis["events"]:
+            position = event["position_enu"]
+            result = "PASS" if event["passed"] else "FAIL"
+            html.append(
+                f"<li>G{event['gate_index'] + 1}: {result} at "
+                f"t={event['time'] - outputs[0][2][0]:.3f} s, "
+                f"ENU=({position[0]:.3f}, {position[1]:.3f}, {position[2]:.3f}) m, "
+                f"lateral error={abs(event['tangent_error']):.3f} m, "
+                f"height error={abs(event['height_error']):.3f} m</li>"
+            )
+        html.append("</ul>")
     if rpm_commanded_observed is not None:
         html.append(f"<h2>RPM commanded vs observed</h2><img src=\"{rpm_commanded_observed.name}\">")
     html.append("</body></html>")
@@ -443,6 +681,17 @@ def generate_rl(path, output_base, threshold_rpm, pad_s, active_only=False,
     print(f"RL intervals shown: {plotted_intervals or 'none'}")
     if airborne_details:
         print(f"Airborne cutoff: {airborne_details}")
+    if gate_analysis is not None:
+        for event in gate_analysis["events"]:
+            position = event["position_enu"]
+            result = "PASS" if event["passed"] else "FAIL"
+            print(
+                f"Gate G{event['gate_index'] + 1}: {result}; "
+                f"t_rel={event['time'] - outputs[0][2][0]:.3f}s; "
+                f"ENU=({position[0]:.3f}, {position[1]:.3f}, {position[2]:.3f})m; "
+                f"lateral_error={abs(event['tangent_error']):.3f}m; "
+                f"height_error={abs(event['height_error']):.3f}m"
+            )
 
 
 def generate(path, output_base, threshold_rpm, pad_s, nn_active_only=False,

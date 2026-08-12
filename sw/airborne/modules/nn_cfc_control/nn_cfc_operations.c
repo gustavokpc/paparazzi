@@ -3,26 +3,38 @@
 #include <math.h>
 
 #define BN_EPS 1.0e-5f
+#define LTC_EPS 1.0e-8f
 
 #if NUM_STATES != 19
-#error "The bebop2_delayed_correct_sign export expects exactly 19 physical state inputs."
+#error "The corrected-sign Bebop2 Conv-LTC export expects 19 physical inputs."
 #endif
 
-static float nn_hidden[HIDDEN_SIZE];
+static float nn_ltc_state[HIDDEN_SIZE];
+
+#if LTC_USES_RUNTIME_TIMESPAN
+static float nn_ltc_timespan_s = LTC_DEFAULT_TIMESPAN;
+
+void nn_set_timespan(float timespan_s)
+{
+  if (isfinite(timespan_s) && timespan_s > 0.0f) {
+    nn_ltc_timespan_s = timespan_s;
+  }
+}
+#endif
 
 static inline float sigmoidf_local(float x)
 {
-  return 1.0f / (1.0f + expf(-x));
+  if (x >= 0.0f) {
+    const float z = expf(-x);
+    return 1.0f / (1.0f + z);
+  }
+  const float z = expf(x);
+  return z / (1.0f + z);
 }
 
 static inline float reluf_local(float x)
 {
   return x > 0.0f ? x : 0.0f;
-}
-
-static inline float lecun_tanhf_local(float x)
-{
-  return 1.7159f * tanhf(0.666f * x);
 }
 
 static void clamp_output(float *restrict y)
@@ -41,20 +53,6 @@ static void normalize(const float *restrict x, float *restrict y)
   for (int i = 0; i < NUM_STATES; ++i) {
     y[i] = (x[i] - input_norm_min[i]) /
            (input_norm_max[i] - input_norm_min[i] + 1.0e-10f);
-  }
-}
-
-static void matvec(const float *restrict x, float *restrict y,
-                   const float *restrict w, const float *restrict b,
-                   int in_dim, int out_dim)
-{
-  for (int o = 0; o < out_dim; ++o) {
-    const float *row = &w[o * in_dim];
-    float acc = b[o];
-    for (int i = 0; i < in_dim; ++i) {
-      acc += row[i] * x[i];
-    }
-    y[o] = acc;
   }
 }
 
@@ -102,7 +100,7 @@ static void conv1d_bn_relu(const float *x, float *y,
   }
 }
 
-static void conv_features(const float *x, float *feat)
+static void conv_features(const float *x, float *features)
 {
   float c1[64 * 10];
   float c2[128 * 5];
@@ -127,72 +125,92 @@ static void conv_features(const float *x, float *feat)
                  128, 3, 256, 2);
 
   for (int i = 0; i < CONV_FEATURES; ++i) {
-    feat[i] = 0.5f * (c4[i * 2] + c4[i * 2 + 1]);
+    features[i] = 0.5f * (c4[i * 2] + c4[i * 2 + 1]);
   }
 }
 
 void nn_reset(void)
 {
   for (int i = 0; i < HIDDEN_SIZE; ++i) {
-    nn_hidden[i] = 0.0f;
+    nn_ltc_state[i] = 0.0f;
   }
+#if LTC_USES_RUNTIME_TIMESPAN
+  nn_ltc_timespan_s = LTC_DEFAULT_TIMESPAN;
+#endif
 }
 
 void nn_control(const float *state, float *control)
 {
-  float x[NUM_STATES];
-  float feat[CONV_FEATURES];
-  float cat[CONV_FEATURES + HIDDEN_SIZE];
-  float backbone[128];
-  float ff1[HIDDEN_SIZE];
-  float ff2[HIDDEN_SIZE];
-  float time_a[HIDDEN_SIZE];
-  float time_b[HIDDEN_SIZE];
+  float normalized[NUM_STATES];
+  float sensory_input[CONV_FEATURES];
+  float sensory_numerator[HIDDEN_SIZE];
+  float sensory_denominator[HIDDEN_SIZE];
+  float cm_t[HIDDEN_SIZE];
 
-  normalize(state, x);
-  conv_features(x, feat);
+  normalize(state, normalized);
+  conv_features(normalized, sensory_input);
 
   for (int i = 0; i < CONV_FEATURES; ++i) {
-    cat[i] = feat[i];
-  }
-  for (int i = 0; i < HIDDEN_SIZE; ++i) {
-    cat[CONV_FEATURES + i] = nn_hidden[i];
+    sensory_input[i] = sensory_input[i] * ltc_input_w[i] + ltc_input_b[i];
   }
 
-  matvec(cat, backbone,
-         rnn_rnn_cell_backbone_0_weight,
-         rnn_rnn_cell_backbone_0_bias,
-         CONV_FEATURES + HIDDEN_SIZE, 128);
-  for (int i = 0; i < 128; ++i) {
-    backbone[i] = lecun_tanhf_local(backbone[i]);
+  for (int j = 0; j < HIDDEN_SIZE; ++j) {
+    sensory_numerator[j] = 0.0f;
+    sensory_denominator[j] = 0.0f;
+  }
+  for (int i = 0; i < CONV_FEATURES; ++i) {
+    for (int j = 0; j < HIDDEN_SIZE; ++j) {
+      const int index = i * HIDDEN_SIZE + j;
+      const float activation = sigmoidf_local(
+          ltc_sensory_sigma[index] *
+          (sensory_input[i] - ltc_sensory_mu[index]));
+      const float conductance = ltc_sensory_w_positive[index] * activation;
+      sensory_numerator[j] += conductance * ltc_sensory_erev[index];
+      sensory_denominator[j] += conductance;
+    }
   }
 
-  matvec(backbone, ff1,
-         rnn_rnn_cell_ff1_weight, rnn_rnn_cell_ff1_bias,
-         128, HIDDEN_SIZE);
-  matvec(backbone, ff2,
-         rnn_rnn_cell_ff2_weight, rnn_rnn_cell_ff2_bias,
-         128, HIDDEN_SIZE);
-  matvec(backbone, time_a,
-         rnn_rnn_cell_time_a_weight, rnn_rnn_cell_time_a_bias,
-         128, HIDDEN_SIZE);
-  matvec(backbone, time_b,
-         rnn_rnn_cell_time_b_weight, rnn_rnn_cell_time_b_bias,
-         128, HIDDEN_SIZE);
-
-  /*
-   * This checkpoint has no dt input. ncps.CfC therefore used its implicit
-   * timespan of exactly 1.0 during training and Python inference.
-   */
-  for (int i = 0; i < HIDDEN_SIZE; ++i) {
-    const float f1 = tanhf(ff1[i]);
-    const float f2 = tanhf(ff2[i]);
-    const float interpolation = sigmoidf_local(time_a[i] + time_b[i]);
-    nn_hidden[i] = f1 * (1.0f - interpolation) + interpolation * f2;
+#if LTC_USES_RUNTIME_TIMESPAN
+  const float elapsed_time = nn_ltc_timespan_s;
+#else
+  const float elapsed_time = LTC_DEFAULT_TIMESPAN;
+#endif
+  for (int j = 0; j < HIDDEN_SIZE; ++j) {
+    cm_t[j] = ltc_cm_positive[j] /
+              (elapsed_time / (float)LTC_ODE_UNFOLDS);
   }
 
-  matvec(nn_hidden, control,
-         rnn_fc_weight, rnn_fc_bias,
-         HIDDEN_SIZE, NUM_CONTROLS);
+  for (int unfold = 0; unfold < LTC_ODE_UNFOLDS; ++unfold) {
+    float numerator[HIDDEN_SIZE];
+    float denominator[HIDDEN_SIZE];
+    for (int j = 0; j < HIDDEN_SIZE; ++j) {
+      numerator[j] = sensory_numerator[j];
+      denominator[j] = sensory_denominator[j];
+    }
+
+    for (int i = 0; i < HIDDEN_SIZE; ++i) {
+      for (int j = 0; j < HIDDEN_SIZE; ++j) {
+        const int index = i * HIDDEN_SIZE + j;
+        const float activation = sigmoidf_local(
+            ltc_sigma[index] * (nn_ltc_state[i] - ltc_mu[index]));
+        const float conductance = ltc_w_positive[index] * activation;
+        numerator[j] += conductance * ltc_erev[index];
+        denominator[j] += conductance;
+      }
+    }
+
+    for (int j = 0; j < HIDDEN_SIZE; ++j) {
+      const float total_numerator =
+          cm_t[j] * nn_ltc_state[j] +
+          ltc_gleak_positive[j] * ltc_vleak[j] + numerator[j];
+      const float total_denominator =
+          cm_t[j] + ltc_gleak_positive[j] + denominator[j];
+      nn_ltc_state[j] = total_numerator / (total_denominator + LTC_EPS);
+    }
+  }
+
+  for (int i = 0; i < NUM_CONTROLS; ++i) {
+    control[i] = nn_ltc_state[i] * ltc_output_w[i] + ltc_output_b[i];
+  }
   clamp_output(control);
 }

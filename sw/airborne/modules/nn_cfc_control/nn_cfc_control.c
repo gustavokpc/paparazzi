@@ -959,10 +959,10 @@ bool nn_cfc_landing_approach_stable(void)
 {
   const struct EnuCoor_f *pos = stateGetPositionEnu_f();
   const struct EnuCoor_f *speed = stateGetSpeedEnu_f();
-  return hypotf(pos->x, pos->y) < 0.15f &&
-         fabsf(pos->z - 1.0f) < 0.15f &&
-         hypotf(speed->x, speed->y) < 0.15f &&
-         fabsf(speed->z) < 0.10f;
+  return hypotf(pos->x, pos->y) < 0.30f &&
+         fabsf(pos->z - 1.0f) < 0.30f &&
+         hypotf(speed->x, speed->y) < 0.30f &&
+         fabsf(speed->z) < 0.30f;
 }
 
 bool nn_cfc_landing_recovery_stable(void)

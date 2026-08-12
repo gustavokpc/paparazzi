@@ -1,0 +1,14 @@
+<!doctype html><html><head><meta charset="utf-8">
+<title>RL: Gazebo 092458 vs onboard 083120</title>
+<style>body{font-family:sans-serif;margin:24px;background:#f7f7f7;color:#222}img{max-width:100%;background:white;border:1px solid #ccc;margin:8px 0 28px}table{border-collapse:collapse;background:white}th,td{border:1px solid #ccc;padding:6px}</style>
+</head><body><h1>RL: Gazebo 092458 vs onboard 083120</h1>
+<p>All curves are aligned at controller activation and stop at the end of the usable active/airborne window.</p>
+<table><tr><th>run</th><th>controller</th><th>duration [s]</th><th>position RMS [m]</th><th>rate RMS [rad/s]</th><th>RPM tracking RMSE</th></tr>
+<tr><td>Gazebo 20260806-092458</td><td>RL</td><td>17.58</td><td>4.218</td><td>1.467</td><td>0</td></tr>
+<tr><td>onboard 083120</td><td>RL</td><td>7.239</td><td>4.635</td><td>2.206</td><td>654.6</td></tr>
+</table>
+<h2>All states</h2><img src="states_active_comparison.png">
+<h2>Motor RPM</h2><img src="rpm_active_comparison.png">
+<h2>XY trajectory</h2><img src="trajectory_xy_active_comparison.png">
+<h2>Metric summary</h2><img src="metrics_active_comparison.png">
+</body></html>

@@ -1,0 +1,14 @@
+<!doctype html><html><head><meta charset="utf-8">
+<title>NN pair 2: Gazebo 093258 vs onboard 082825</title>
+<style>body{font-family:sans-serif;margin:24px;background:#f7f7f7;color:#222}img{max-width:100%;background:white;border:1px solid #ccc;margin:8px 0 28px}table{border-collapse:collapse;background:white}th,td{border:1px solid #ccc;padding:6px}</style>
+</head><body><h1>NN pair 2: Gazebo 093258 vs onboard 082825</h1>
+<p>All curves are aligned at controller activation and stop at the end of the usable active/airborne window.</p>
+<table><tr><th>run</th><th>controller</th><th>duration [s]</th><th>position RMS [m]</th><th>rate RMS [rad/s]</th><th>RPM tracking RMSE</th></tr>
+<tr><td>Gazebo 20260806-093258</td><td>NN</td><td>42.34</td><td>2.963</td><td>0.2236</td><td>430.9</td></tr>
+<tr><td>onboard 082825</td><td>NN</td><td>15.08</td><td>2.578</td><td>1.231</td><td>1657</td></tr>
+</table>
+<h2>All states</h2><img src="states_active_comparison.png">
+<h2>Motor RPM</h2><img src="rpm_active_comparison.png">
+<h2>XY trajectory</h2><img src="trajectory_xy_active_comparison.png">
+<h2>Metric summary</h2><img src="metrics_active_comparison.png">
+</body></html>

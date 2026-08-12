@@ -1,0 +1,11 @@
+<!doctype html><html><head><meta charset="utf-8">
+<title>LTC timing report</title>
+<style>body{font-family:sans-serif;margin:24px;background:#f7f7f7;color:#222}table{border-collapse:collapse;background:white}th,td{border:1px solid #ccc;padding:6px}img{max-width:100%;background:white;border:1px solid #ccc;margin:8px 0 28px}</style>
+</head><body><h1>LTC inference timing and effective frequency</h1>
+<p><strong>Effective Hz</strong> is measured from <code>Δnn_periodic_count / Δtime</code> over the enabled interval. It therefore includes scheduling, inference, sensor acquisition, and logging interference; it is not the theoretical reciprocal of inference latency.</p>
+<table><tr><th>run</th><th>effective Hz</th><th>inference mean [ms]</th><th>median [ms]</th><th>p95 [ms]</th><th>p99 [ms]</th><th>max [ms]</th><th>total mean [ms]</th><th>compute utilization</th></tr>
+<tr><td>onboard 081514</td><td>18.32</td><td>46.607</td><td>46.584</td><td>47.717</td><td>47.993</td><td>54.011</td><td>46.679</td><td>85.5%</td></tr><tr><td>onboard 081857</td><td>18.38</td><td>46.537</td><td>46.554</td><td>47.657</td><td>47.966</td><td>52.086</td><td>46.606</td><td>85.7%</td></tr><tr><td>onboard 082223</td><td>18.44</td><td>46.368</td><td>46.391</td><td>47.410</td><td>47.788</td><td>52.135</td><td>46.437</td><td>85.7%</td></tr><tr><td>onboard 082501</td><td>55.51</td><td>9.868</td><td>9.777</td><td>10.275</td><td>10.435</td><td>15.820</td><td>9.942</td><td>55.2%</td></tr><tr><td>onboard 082825</td><td>55.10</td><td>9.881</td><td>9.812</td><td>10.292</td><td>10.505</td><td>15.812</td><td>9.953</td><td>54.8%</td></tr><tr><td>Gazebo 092641</td><td>102.35</td><td>0.944</td><td>1.112</td><td>1.277</td><td>1.494</td><td>2.904</td><td>0.947</td><td>9.7%</td></tr><tr><td>Gazebo 093258</td><td>102.35</td><td>1.107</td><td>1.324</td><td>1.493</td><td>1.654</td><td>3.911</td><td>1.110</td><td>11.4%</td></tr><tr><td>Gazebo 095503</td><td>102.35</td><td>1.151</td><td>1.341</td><td>1.508</td><td>1.686</td><td>4.571</td><td>1.154</td><td>11.8%</td></tr></table>
+<h2>Summary</h2><img src="ltc_timing_summary.png">
+<h2>Inference distributions</h2><img src="ltc_inference_distribution.png">
+<h2>Rolling effective frequency</h2><img src="ltc_effective_hz_rolling.png">
+</body></html>

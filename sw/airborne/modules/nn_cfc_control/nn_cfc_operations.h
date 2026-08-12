@@ -3,10 +3,10 @@
 
 #include "nn_cfc_parameters.h"
 
-/* This checkpoint reproduces ncps.CfC's implicit elapsed_time=1.0. */
-#define NN_CFC_SUPPORTS_RUNTIME_TIMESPAN 0
+#define NN_CFC_SUPPORTS_RUNTIME_TIMESPAN 1
 
 void nn_reset(void);
 void nn_control(const float *state, float *control);
+void nn_set_timespan(float timespan_s);
 
 #endif

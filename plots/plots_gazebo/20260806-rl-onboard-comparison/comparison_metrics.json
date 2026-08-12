@@ -1,0 +1,216 @@
+[
+  {
+    "path": "var/log/rl_cfc_control/20260806-092458.csv",
+    "controller": "RL",
+    "active_start_log_time_s": 14.139144,
+    "plotted_active_duration_s": 17.576230000000002,
+    "samples": 1800,
+    "position_error_rms_m": 4.218475261982605,
+    "position_error_peak_m": 5.84750206091986,
+    "body_rate_rms_rad_s": 1.467047511732599,
+    "body_rate_peak_rad_s": 5.601768,
+    "rpm_tracking_rmse": 0.0,
+    "feedback_rpm_rms": 9333.37249204807,
+    "waypoint_transitions": [
+      {
+        "from": 2,
+        "to": 3,
+        "time_s": 0.9965399999999995
+      },
+      {
+        "from": 3,
+        "to": 4,
+        "time_s": 1.4264200000000002
+      },
+      {
+        "from": 4,
+        "to": 5,
+        "time_s": 2.237330000000002
+      },
+      {
+        "from": 5,
+        "to": 6,
+        "time_s": 2.7844500000000014
+      },
+      {
+        "from": 6,
+        "to": 7,
+        "time_s": 3.2827199999999994
+      },
+      {
+        "from": 7,
+        "to": 0,
+        "time_s": 3.9470800000000015
+      },
+      {
+        "from": 0,
+        "to": 1,
+        "time_s": 4.484429
+      },
+      {
+        "from": 1,
+        "to": 2,
+        "time_s": 4.914309000000001
+      },
+      {
+        "from": 2,
+        "to": 3,
+        "time_s": 5.50051
+      },
+      {
+        "from": 3,
+        "to": 4,
+        "time_s": 6.076939999999999
+      },
+      {
+        "from": 4,
+        "to": 5,
+        "time_s": 6.839
+      },
+      {
+        "from": 5,
+        "to": 6,
+        "time_s": 7.522900999999999
+      },
+      {
+        "from": 6,
+        "to": 7,
+        "time_s": 7.913698999999999
+      },
+      {
+        "from": 7,
+        "to": 0,
+        "time_s": 8.72461
+      },
+      {
+        "from": 0,
+        "to": 1,
+        "time_s": 9.35966
+      },
+      {
+        "from": 1,
+        "to": 2,
+        "time_s": 9.926319999999999
+      },
+      {
+        "from": 2,
+        "to": 3,
+        "time_s": 10.473439
+      },
+      {
+        "from": 3,
+        "to": 4,
+        "time_s": 11.079181
+      },
+      {
+        "from": 4,
+        "to": 5,
+        "time_s": 11.78262
+      },
+      {
+        "from": 5,
+        "to": 6,
+        "time_s": 12.446980000000002
+      },
+      {
+        "from": 6,
+        "to": 7,
+        "time_s": 12.867089000000002
+      },
+      {
+        "from": 7,
+        "to": 0,
+        "time_s": 13.638921000000002
+      },
+      {
+        "from": 0,
+        "to": 1,
+        "time_s": 14.215349999999999
+      },
+      {
+        "from": 1,
+        "to": 2,
+        "time_s": 14.81132
+      },
+      {
+        "from": 2,
+        "to": 3,
+        "time_s": 15.397519
+      },
+      {
+        "from": 3,
+        "to": 4,
+        "time_s": 15.98372
+      },
+      {
+        "from": 4,
+        "to": 5,
+        "time_s": 16.794629
+      },
+      {
+        "from": 5,
+        "to": 6,
+        "time_s": 17.400371
+      }
+    ],
+    "ground_contact_time_s": null,
+    "label": "Gazebo 20260806-092458"
+  },
+  {
+    "path": "var/logs/log_onboard/20260806-083120.csv",
+    "controller": "RL",
+    "active_start_log_time_s": 51.452785,
+    "plotted_active_duration_s": 7.2392540000000025,
+    "samples": 723,
+    "position_error_rms_m": 4.634579174231905,
+    "position_error_peak_m": 6.7152885847217325,
+    "body_rate_rms_rad_s": 2.205887978095767,
+    "body_rate_peak_rad_s": 17.428223,
+    "rpm_tracking_rmse": 654.6498964028822,
+    "feedback_rpm_rms": 8837.458771191154,
+    "waypoint_transitions": [
+      {
+        "from": 2,
+        "to": 3,
+        "time_s": 1.0800669999999997
+      },
+      {
+        "from": 3,
+        "to": 4,
+        "time_s": 1.6113169999999997
+      },
+      {
+        "from": 4,
+        "to": 5,
+        "time_s": 2.3681570000000036
+      },
+      {
+        "from": 5,
+        "to": 6,
+        "time_s": 3.3330120000000036
+      },
+      {
+        "from": 6,
+        "to": 7,
+        "time_s": 3.9775320000000036
+      },
+      {
+        "from": 7,
+        "to": 0,
+        "time_s": 4.573227000000003
+      },
+      {
+        "from": 0,
+        "to": 1,
+        "time_s": 5.217770000000002
+      },
+      {
+        "from": 1,
+        "to": 2,
+        "time_s": 5.6093720000000005
+      }
+    ],
+    "ground_contact_time_s": null,
+    "label": "onboard 083120"
+  }
+]

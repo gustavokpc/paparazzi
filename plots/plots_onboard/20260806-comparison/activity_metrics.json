@@ -1,0 +1,135 @@
+[
+  {
+    "label": "NN 081447",
+    "path": "var/logs/log_onboard/20260806-081447.csv",
+    "controller": "NN",
+    "inactive": {
+      "duration_s": 0.0,
+      "body_rate_rms_rad_s": null,
+      "roll_pitch_rms_rad": null,
+      "rpm_command_tracking_rmse": null,
+      "samples": 0
+    },
+    "active": {
+      "duration_s": 0.0,
+      "body_rate_rms_rad_s": null,
+      "roll_pitch_rms_rad": null,
+      "rpm_command_tracking_rmse": null,
+      "samples": 0
+    }
+  },
+  {
+    "label": "NN 081514",
+    "path": "var/logs/log_onboard/20260806-081514.csv",
+    "controller": "NN",
+    "inactive": {
+      "duration_s": 17.109359999999995,
+      "body_rate_rms_rad_s": 0.16318311504645389,
+      "roll_pitch_rms_rad": 0.0045328737439545436,
+      "rpm_command_tracking_rmse": 226.412754968742,
+      "samples": 1755
+    },
+    "active": {
+      "duration_s": 2.425795999999991,
+      "body_rate_rms_rad_s": 2.854413365888616,
+      "roll_pitch_rms_rad": 0.23104255186972852,
+      "rpm_command_tracking_rmse": 2178.722717229393,
+      "samples": 42
+    }
+  },
+  {
+    "label": "NN 081857",
+    "path": "var/logs/log_onboard/20260806-081857.csv",
+    "controller": "NN",
+    "inactive": {
+      "duration_s": 11.76757,
+      "body_rate_rms_rad_s": 0.17665878151780703,
+      "roll_pitch_rms_rad": 0.008571793082866187,
+      "rpm_command_tracking_rmse": 207.19294800535783,
+      "samples": 1206
+    },
+    "active": {
+      "duration_s": 1.8271410000000046,
+      "body_rate_rms_rad_s": 3.5823519766368412,
+      "roll_pitch_rms_rad": 0.39732803322032834,
+      "rpm_command_tracking_rmse": 1844.9560038792254,
+      "samples": 32
+    }
+  },
+  {
+    "label": "NN 082223",
+    "path": "var/logs/log_onboard/20260806-082223.csv",
+    "controller": "NN",
+    "inactive": {
+      "duration_s": 12.509761999999995,
+      "body_rate_rms_rad_s": 0.16730087758017195,
+      "roll_pitch_rms_rad": 0.005018543397431497,
+      "rpm_command_tracking_rmse": 193.25333730390057,
+      "samples": 1282
+    },
+    "active": {
+      "duration_s": 0.8945270000000036,
+      "body_rate_rms_rad_s": 4.4204969639205,
+      "roll_pitch_rms_rad": 0.5280811239048646,
+      "rpm_command_tracking_rmse": 2574.877023762494,
+      "samples": 16
+    }
+  },
+  {
+    "label": "NN 082501",
+    "path": "var/logs/log_onboard/20260806-082501.csv",
+    "controller": "NN",
+    "inactive": {
+      "duration_s": 63.412094999999994,
+      "body_rate_rms_rad_s": 0.19163156499886752,
+      "roll_pitch_rms_rad": 0.018832246507604133,
+      "rpm_command_tracking_rmse": 225.7206188192831,
+      "samples": 6496
+    },
+    "active": {
+      "duration_s": 7.386718999999999,
+      "body_rate_rms_rad_s": 1.1767484482483646,
+      "roll_pitch_rms_rad": 0.11710457812230557,
+      "rpm_command_tracking_rmse": 1556.1877028258875,
+      "samples": 347
+    }
+  },
+  {
+    "label": "NN 082825",
+    "path": "var/logs/log_onboard/20260806-082825.csv",
+    "controller": "NN",
+    "inactive": {
+      "duration_s": 45.529289,
+      "body_rate_rms_rad_s": 0.22727897202891406,
+      "roll_pitch_rms_rad": 0.023953186342546826,
+      "rpm_command_tracking_rmse": 256.92289454352186,
+      "samples": 4665
+    },
+    "active": {
+      "duration_s": 15.082015999999996,
+      "body_rate_rms_rad_s": 1.2314254431579896,
+      "roll_pitch_rms_rad": 0.10883912005815562,
+      "rpm_command_tracking_rmse": 1656.6476150280575,
+      "samples": 714
+    }
+  },
+  {
+    "label": "RL 083120",
+    "path": "var/logs/log_onboard/20260806-083120.csv",
+    "controller": "RL",
+    "inactive": {
+      "duration_s": 14.580074999999994,
+      "body_rate_rms_rad_s": 0.155380147714339,
+      "roll_pitch_rms_rad": 0.00518322419902801,
+      "rpm_command_tracking_rmse": 193.0906843502938,
+      "samples": 1494
+    },
+    "active": {
+      "duration_s": 7.131829000000003,
+      "body_rate_rms_rad_s": 1.666892082666193,
+      "roll_pitch_rms_rad": 0.5245684102482869,
+      "rpm_command_tracking_rmse": 560.1983193050896,
+      "samples": 712
+    }
+  }
+]

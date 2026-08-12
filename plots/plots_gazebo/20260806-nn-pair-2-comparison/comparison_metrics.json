@@ -1,0 +1,46 @@
+[
+  {
+    "path": "var/log/nn_cfc_control/20260806-093258.csv",
+    "controller": "NN",
+    "active_start_log_time_s": 19.014374,
+    "plotted_active_duration_s": 42.343181,
+    "samples": 4335,
+    "position_error_rms_m": 2.9633296013291317,
+    "position_error_peak_m": 3.0900984073444975,
+    "body_rate_rms_rad_s": 0.22356359424479436,
+    "body_rate_peak_rad_s": 3.610983,
+    "rpm_tracking_rmse": 430.9456206319483,
+    "feedback_rpm_rms": 7762.671178532991,
+    "waypoint_transitions": [
+      {
+        "from": 72,
+        "to": 88,
+        "time_s": 5.1292490000000015
+      }
+    ],
+    "ground_contact_time_s": null,
+    "label": "Gazebo 20260806-093258"
+  },
+  {
+    "path": "var/logs/log_onboard/20260806-082825.csv",
+    "controller": "NN",
+    "active_start_log_time_s": 56.956619,
+    "plotted_active_duration_s": 15.082015999999996,
+    "samples": 714,
+    "position_error_rms_m": 2.578259279645394,
+    "position_error_peak_m": 3.133840481703879,
+    "body_rate_rms_rad_s": 1.2314254431579896,
+    "body_rate_peak_rad_s": 5.049805,
+    "rpm_tracking_rmse": 1656.6476150280575,
+    "feedback_rpm_rms": 8060.225290213146,
+    "waypoint_transitions": [
+      {
+        "from": 72,
+        "to": 88,
+        "time_s": 5.287093999999996
+      }
+    ],
+    "ground_contact_time_s": null,
+    "label": "onboard 082825"
+  }
+]

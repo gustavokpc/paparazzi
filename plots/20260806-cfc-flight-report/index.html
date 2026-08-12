@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>2026-08-06 CFC flight report</title>
+  <style>
+    body { font-family: sans-serif; margin: 24px; background: #f7f7f7; color: #222; }
+    a { color: #175a9c; }
+    table { border-collapse: collapse; background: white; margin-bottom: 28px; }
+    th, td { border: 1px solid #ccc; padding: 7px 10px; text-align: left; }
+    img { max-width: 100%; background: white; border: 1px solid #ccc; margin: 8px 0 28px; }
+    .note { max-width: 1100px; }
+  </style>
+</head>
+<body>
+  <h1>2026-08-06 — onboard and Gazebo CFC report</h1>
+  <p class="note">
+    Full-log plots preserve controller-inactive operation; NN/RL active pages are aligned to the
+    controller interval and limited at detected ground contact where applicable. The file at 08:14:47
+    contains no motor-on or controller-active samples and is retained as a logger/no-flight reference.
+  </p>
+
+  <h2>Onboard logs</h2>
+  <table>
+    <tr><th>Log</th><th>Controller</th><th>Full plots</th><th>Active plots</th><th>Usable active duration</th></tr>
+    <tr><td>08:14:47</td><td>NN</td><td><a href="../plots_onboard/20260806-081447/index.html">open</a></td><td>not activated</td><td>0 s</td></tr>
+    <tr><td>08:15:14</td><td>NN</td><td><a href="../plots_onboard/20260806-081514/index.html">open</a></td><td><a href="../plots_onboard/20260806-081514/nn_active/index.html">open</a></td><td>3.14 s (ground contact)</td></tr>
+    <tr><td>08:18:57</td><td>NN</td><td><a href="../plots_onboard/20260806-081857/index.html">open</a></td><td><a href="../plots_onboard/20260806-081857/nn_active/index.html">open</a></td><td>1.83 s (ground contact)</td></tr>
+    <tr><td>08:22:23</td><td>NN</td><td><a href="../plots_onboard/20260806-082223/index.html">open</a></td><td><a href="../plots_onboard/20260806-082223/nn_active/index.html">open</a></td><td>1.01 s (ground contact)</td></tr>
+    <tr><td>08:25:01</td><td>NN</td><td><a href="../plots_onboard/20260806-082501/index.html">open</a></td><td><a href="../plots_onboard/20260806-082501/nn_active/index.html">open</a></td><td>7.39 s</td></tr>
+    <tr><td>08:28:25</td><td>NN</td><td><a href="../plots_onboard/20260806-082825/index.html">open</a></td><td><a href="../plots_onboard/20260806-082825/nn_active/index.html">open</a></td><td>15.08 s</td></tr>
+    <tr><td>08:31:20</td><td>RL</td><td><a href="../plots_onboard/20260806-083120/index.html">open</a></td><td><a href="../plots_onboard/20260806-083120/rl_active/index.html">open</a></td><td>7.24 s</td></tr>
+  </table>
+
+  <p><a href="../plots_onboard/20260806-comparison/index.html">Open active × inactive onboard report</a></p>
+  <img src="../plots_onboard/20260806-comparison/controller_activity_timeline.png" alt="Controller activity timeline">
+  <img src="../plots_onboard/20260806-comparison/active_vs_inactive_metrics.png" alt="Active versus inactive metrics">
+
+  <h2>Gazebo runs</h2>
+  <table>
+    <tr><th>Log</th><th>Controller</th><th>Full plots</th><th>Active plots</th></tr>
+    <tr><td>09:24:58</td><td>RL</td><td><a href="../plots_gazebo/20260806-092458/index.html">open</a></td><td><a href="../plots_gazebo/20260806-092458/rl_active/index.html">open</a></td></tr>
+    <tr><td>09:26:41</td><td>NN</td><td><a href="../plots_gazebo/20260806-092641/index.html">open</a></td><td><a href="../plots_gazebo/20260806-092641/nn_active/index.html">open</a></td></tr>
+    <tr><td>09:32:58</td><td>NN</td><td><a href="../plots_gazebo/20260806-093258/index.html">open</a></td><td><a href="../plots_gazebo/20260806-093258/nn_active/index.html">open</a></td></tr>
+  </table>
+
+  <h2>Gazebo × onboard comparisons</h2>
+  <ul>
+    <li><a href="../plots_gazebo/20260806-nn-all-onboard-comparison/index.html">NN Gazebo 09:26:41 × all active NN flights</a></li>
+    <li><a href="../plots_gazebo/20260806-nn-pair-1-comparison/index.html">NN chronological pair 1: Gazebo 09:26:41 × onboard 08:25:01</a></li>
+    <li><a href="../plots_gazebo/20260806-nn-pair-2-comparison/index.html">NN chronological pair 2: Gazebo 09:32:58 × onboard 08:28:25</a></li>
+    <li><a href="../plots_gazebo/20260806-rl-onboard-comparison/index.html">RL: Gazebo 09:24:58 × onboard 08:31:20</a></li>
+  </ul>
+  <img src="../plots_gazebo/20260806-nn-all-onboard-comparison/states_active_comparison.png" alt="NN states comparison">
+  <img src="../plots_gazebo/20260806-rl-onboard-comparison/metrics_active_comparison.png" alt="RL metric comparison">
+
+  <h2>LTC timing</h2>
+  <p><a href="../20260806-ltc-timing/index.html">Open inference-latency and effective-frequency report</a></p>
+  <img src="../20260806-ltc-timing/ltc_timing_summary.png" alt="LTC timing summary">
+</body>
+</html>
